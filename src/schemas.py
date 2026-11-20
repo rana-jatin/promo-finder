@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
-from pydantic import AliasChoices, BaseModel, Field, create_model, field_validator, model_validator
+from pydantic import (AliasChoices, BaseModel, BeforeValidator, Field, create_model, field_validator,
+                      model_validator)
 
 
 def _snake(v: object, default: str = "other") -> str:
@@ -39,6 +40,12 @@ def _clamp01(v: object) -> float:
 def _opt_id(v: object) -> Optional[str]:
     s = str(v or "").strip()
     return None if s.lower() in ("", "null", "none", "n/a") else s
+
+
+# Field types that carry their own clean-up, shared by every model below (same JSON Schema as plain str/float).
+Label = Annotated[str, BeforeValidator(_snake)]  # hook_type, trope: "Slap Reveal!" -> slap_reveal
+ArcId = Annotated[str, BeforeValidator(lambda v: _snake(v, "new"))]
+Confidence = Annotated[float, BeforeValidator(_clamp01)]
 
 
 # --------------------------------------------------------------------------- bible
@@ -99,11 +106,11 @@ class Moment(BaseModel):
     peak_id: Optional[str] = None  # cold_open only
     next_start_id: Optional[str] = None  # bridge only
     next_cliff_id: Optional[str] = None  # bridge only
-    hook_type: str = "other"
-    trope: str = "other"
+    hook_type: Label = "other"
+    trope: Label = "other"
     intended_question: str = Field("", validation_alias=_QUESTION)
     why: str = ""
-    confidence: float = 0.5
+    confidence: Confidence = 0.5
 
     @field_validator("template", mode="before")
     @classmethod
@@ -121,16 +128,6 @@ class Moment(BaseModel):
     def _opt_ids(cls, v):
         return _opt_id(v)
 
-    @field_validator("hook_type", "trope", mode="before")
-    @classmethod
-    def _labels(cls, v):
-        return _snake(v)
-
-    @field_validator("confidence", mode="before")
-    @classmethod
-    def _conf(cls, v):
-        return _clamp01(v)
-
 
 class Bridge(BaseModel):
     """v1 prompts returned the bridge as its own field; v3 returns it as a moment with template 'bridge'."""
@@ -138,30 +135,15 @@ class Bridge(BaseModel):
     hook_id: Optional[str] = None
     next_start_id: Optional[str] = None
     next_cliff_id: str
-    trope: str = "other"
+    trope: Label = "other"
     open_question: str = ""
-    confidence: float = 0.5
-
-    @field_validator("trope", mode="before")
-    @classmethod
-    def norm_trope(cls, v):
-        return _snake(v)
-
-    @field_validator("confidence", mode="before")
-    @classmethod
-    def norm_conf(cls, v):
-        return _clamp01(v)
+    confidence: Confidence = 0.5
 
 
 class BeatNote(BaseModel):
     id: str
     what: str = ""
-    arc: str = "new"
-
-    @field_validator("arc", mode="before")
-    @classmethod
-    def _arc(cls, v):
-        return _snake(v, "new")
+    arc: ArcId = "new"
 
 
 class MineResult(BaseModel):
@@ -183,27 +165,12 @@ class Stitch(BaseModel):
     segments: list[StitchSegment] = Field(min_length=2, max_length=4)
     hook_id: str
     cliff_id: str
-    hook_type: str = "other"
-    trope: str = "other"
-    arc: str = "new"
+    hook_type: Label = "other"
+    trope: Label = "other"
+    arc: ArcId = "new"
     intended_question: str = Field("", validation_alias=_QUESTION)
     why: str = ""
-    confidence: float = 0.5
-
-    @field_validator("hook_type", "trope", mode="before")
-    @classmethod
-    def _labels(cls, v):
-        return _snake(v)
-
-    @field_validator("arc", mode="before")
-    @classmethod
-    def _arc(cls, v):
-        return _snake(v, "new")
-
-    @field_validator("confidence", mode="before")
-    @classmethod
-    def norm_conf(cls, v):
-        return _clamp01(v)
+    confidence: Confidence = 0.5
 
 
 class LinkResult(BaseModel):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 
-from .llm import LLM, LLMOutputError, fill, load_prompt
+from .llm import LLM, LLMOutputError, ask
 from .parse import Show
 from .judge import render_clip
 from .schemas import DuelVerdict
@@ -25,18 +25,16 @@ def swiss_pairs(ids: list[str], wins: dict[str, int], seed_order: list[str], pla
 
 
 def _duel_once(llm: LLM, show: Show, a: dict, b: dict, cfg: dict, cast) -> DuelVerdict:
-    system, user_t = load_prompt(cfg["prompts"]["duel"])
     hook_s = cfg["promo"]["hook_max_s"]
     # separate speaker maps per clip, prefixed so the model never merges A_SPEAKER_1 with B_SPEAKER_1
     ta = render_clip(show, a, cast, prefix="A_", hook_s=hook_s)[0]
     tb = render_clip(show, b, cast, prefix="B_", hook_s=hook_s)[0]
-    user = fill(user_t, a=ta, b=tb)
 
     def offline() -> DuelVerdict:
         sa, sb = a["final_score"], b["final_score"]
         return DuelVerdict(winner="A" if sa >= sb else "B", margin="slight", reason="(offline: higher score)")
 
-    return llm.complete_json(stage="duel", system=system, user=user, schema=DuelVerdict, offline_fn=offline)
+    return ask(llm, cfg, "duel", DuelVerdict, offline, user_vars={"a": ta, "b": tb})
 
 
 def run_duels(llm: LLM, show: Show, shortlist: list[dict], cfg: dict, cast, workers: int = 4) -> list[dict]:

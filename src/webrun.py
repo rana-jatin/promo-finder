@@ -19,8 +19,9 @@ from typing import Any
 from langgraph.types import Command
 
 from .config import load_config
-from .graph import build_app
-from .llm import LLM, QuotaExhausted
+from .graph import prepare_run
+from .io_utils import read_jsonl
+from .llm import LLM, PROVIDER_HINTS, QuotaExhausted
 from .parse import parse_show
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -29,21 +30,11 @@ STAGES = ["parse", "bible", "mine", "link", "assemble", "refine", "coverage", "s
 DOWNLOADS = {"ranked.json": "application/json", "candidates.jsonl": "application/x-ndjson",
              "report.md": "text/markdown; charset=utf-8", "run_meta.json": "application/json",
              "decisions.jsonl": "application/x-ndjson", "bible.json": "application/json"}
-HINTS = {"AuthenticationError": "the API key was rejected",
-         "NotFoundError": "model not found: check the model string",
-         "PermissionDeniedError": "this key has no access to the model",
-         "BadRequestError": "the provider rejected the request"}
 
 
 def recording_key(settings: dict) -> str:
     """Which recorded sample run matches these settings (tools/record_sample.py writes the same keys)."""
     return f"fast={bool(settings.get('fast'))}|duels={bool(settings.get('duels'))}|repair={settings.get('repair_rounds')}"
-
-
-def _jsonl(p: Path) -> list[dict]:
-    if not p.exists():
-        return []
-    return [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]
 
 
 def _json(p: Path) -> Any:
@@ -136,12 +127,9 @@ class RunManager:
             overrides["llm.fallbacks"] = []
         cfg = load_config(None, overrides, overlay=self.overlay)
         h.llm = LLM(cfg, call_log=h.out_dir / "llm_calls.jsonl", api_keys=api_keys)
-        h.ctx = {"show_dir": str(h.show_dir), "out_dir": str(h.out_dir), "config": cfg,
-                 "run_duels": bool(settings.get("duels")), "enable_review": True, "fast": bool(settings.get("fast")),
-                 "episodes": None, "llm": h.llm}
-        h.app = build_app(h.out_dir / "runs.db")
-        h.config = {"configurable": {"thread_id": run_id}, "recursion_limit": 300,
-                    "max_concurrency": cfg["run"]["max_concurrency"]}
+        h.app, h.config, h.ctx = prepare_run(h.show_dir, h.out_dir, cfg, h.llm, run_id,
+                                             duels=bool(settings.get("duels")), review=True,
+                                             fast=bool(settings.get("fast")))
         with self.lock:
             self.runs[run_id] = h
         h.note(f"queued: {len(files)} episode file(s), " + ", ".join(h.llm.describe() if not h.llm.offline
@@ -194,13 +182,12 @@ class RunManager:
                         h.started[name] += 1
                 if chunk.get("interrupts"):
                     continue  # the editor pausing is reported once the step ends
-                if "result" in chunk and name not in ("mine", "refine"):
+                if "result" not in chunk:
+                    continue
+                if name not in ("mine", "refine"):
                     h.note(f"{name} done")
-                elif name in ("mine", "refine") and "result" in chunk:
-                    with h.lock:
-                        if h.finished[name] == h.started[name]:
-                            h.log.append({"t": round(time.time() - h.created, 1),
-                                          "msg": f"{name} done ({h.finished[name]} tasks)"})
+                elif h.finished[name] == h.started[name]:  # fan-out stages: one line when the last task ends
+                    h.note(f"{name} done ({h.finished[name]} tasks)")
             snap = h.app.get_state(h.config)
             if snap.interrupts:
                 payload = snap.interrupts[0].value
@@ -215,7 +202,7 @@ class RunManager:
             self._fail(h, f"Quota exhausted: {e}")
         except Exception as e:  # noqa: BLE001 - shown to the user, never re-raised in a worker thread
             kind = type(e).__name__
-            msg = f"{kind}: {HINTS[kind]}. " if kind in HINTS else f"{kind}: "
+            msg = f"{kind}: {PROVIDER_HINTS[kind]}. " if kind in PROVIDER_HINTS else f"{kind}: "
             self._fail(h, msg + str(e)[:400])
         finally:
             with h.lock:
@@ -250,9 +237,9 @@ class RunManager:
     # ---- quality tab
     @staticmethod
     def quality(h: RunHandle) -> dict:
-        cands = _jsonl(h.out_dir / "candidates.jsonl")
-        code_rejects = _jsonl(h.out_dir / "rejected_by_code.jsonl")
-        pool = _jsonl(h.out_dir / "pool.jsonl")
+        cands = read_jsonl(h.out_dir / "candidates.jsonl")
+        code_rejects = read_jsonl(h.out_dir / "rejected_by_code.jsonl")
+        pool = read_jsonl(h.out_dir / "pool.jsonl")
         meta = _json(h.out_dir / "run_meta.json") or {}
         repaired = [c for c in cands if c.get("rounds", 0) > 0]
         def clean(h0: dict) -> bool:  # threshold pass (v3); older runs only logged the label

@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from .assemble import nudge
+from .io_utils import read_jsonl
 from .parse import Show, fmt_ts
 
 
@@ -66,11 +67,8 @@ def with_nudges(ranked: list[dict], nudges: dict) -> list[dict]:
 
 def log_decisions(out_dir: str | Path, rnd: int, decisions: list[dict], nudge_log: list[dict]) -> None:
     p = Path(out_dir) / "decisions.jsonl"
-    seen = set()
-    if p.exists():  # idempotent: a re-executed editor node does not double-log
-        for line in p.read_text(encoding="utf-8").splitlines():
-            r = json.loads(line)
-            seen.add((r.get("round"), r.get("cand_id"), r.get("action")))
+    # idempotent: a re-executed editor node does not double-log
+    seen = {(r.get("round"), r.get("cand_id"), r.get("action")) for r in read_jsonl(p)}
     with p.open("a", encoding="utf-8") as f:
         for d in decisions:
             key = (rnd, d["cand_id"], d["action"])

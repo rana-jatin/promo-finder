@@ -18,7 +18,7 @@ from typing import Callable, Optional
 
 from .assemble import extend_as_cold_open, refresh, tighten_to_hook, validate
 from .boundaries import snap_end
-from .features import block_intensity
+from .features import block_intensity, ends_open
 from .parse import EPS, Show
 
 
@@ -28,7 +28,7 @@ def _in_clip(cand: dict, show: Show, bid: str | None) -> bool:
 
 
 def _is_open(ln) -> bool:
-    return ln.text.rstrip().endswith(("?", "!", "...", "—", "-")) or block_intensity(ln)[0] >= 0.75
+    return ends_open(ln.text) or block_intensity(ln)[0] >= 0.75
 
 
 def _peak_block(show: Show, cand: dict, P: dict) -> str | None:
@@ -37,7 +37,7 @@ def _peak_block(show: Show, cand: dict, P: dict) -> str | None:
     cliff = show.block(cand["cliff"]["id"])
     for s in cand["segments"]:
         ep = show.ep(s["ep"])
-        for b in [*ep.lines, *ep.actions, *ep.sfx]:
+        for b in ep.beats:
             if not (s["start"] - EPS <= b.start < s["end"]):
                 continue
             t = off + b.start - s["start"]

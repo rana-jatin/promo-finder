@@ -39,6 +39,13 @@ class QuotaExhausted(RuntimeError):
     pass
 
 
+# Provider errors (LiteLLM exception class names) turned into one actionable line by run.py and the web runner.
+PROVIDER_HINTS = {"AuthenticationError": "the API key was rejected",
+                  "NotFoundError": "model or deployment not found: check the model string",
+                  "PermissionDeniedError": "this key has no access to the model",
+                  "BadRequestError": "the provider rejected the request"}
+
+
 # --------------------------------------------------------------------------- prompts
 def load_prompt(name: str) -> tuple[str, str]:
     """prompts/<name>.md holds '# system' and '# user' sections; returns (system, user_template)."""
@@ -56,6 +63,19 @@ def fill(template: str, **values: Any) -> str:
     if missing:
         raise KeyError(f"unfilled prompt variables: {missing}")
     return out
+
+
+def ask(llm: "LLM", cfg: dict, stage: str, schema: type[BaseModel], offline_fn: Callable[[], Any],
+        system_vars: dict | None = None, user_vars: dict | None = None) -> Any:
+    """One stage call: load the stage's configured prompt version, fill both halves, validate against schema."""
+    system, user_t = load_prompt(cfg["prompts"][stage])
+    return llm.complete_json(stage=stage, system=fill(system, **(system_vars or {})),
+                             user=fill(user_t, **(user_vars or {})), schema=schema, offline_fn=offline_fn)
+
+
+def provenance(llm: "LLM", cfg: dict, stage: str) -> dict:
+    """The model and prompt version a stage's output came from (stamped on every stage record)."""
+    return {"model": llm.model_for(stage), "prompt_version": cfg["prompts"][stage]}
 
 
 # --------------------------------------------------------------------------- helpers

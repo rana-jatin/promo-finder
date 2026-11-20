@@ -7,7 +7,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from .llm import LLM, fill, load_prompt
+from .llm import LLM, ask, provenance
 from .parse import Show
 from .schemas import Bible, Character
 
@@ -32,11 +32,9 @@ def offline_bible(show: Show) -> Bible:
 
 def run_bible(llm: LLM, show: Show, cfg: dict) -> dict:
     vocab = cfg["vocab"]["tropes"]
-    system, user_t = load_prompt(cfg["prompts"]["bible"])
-    system = fill(system, free_window=cfg["rank"]["free_window"], trope_vocab=", ".join(vocab))
-    user = fill(user_t, title=show.title, n_episodes=len(show.episodes), headers=headers_text(show))
-    res = llm.complete_json(stage="bible", system=system, user=user, schema=Bible,
-                            offline_fn=lambda: offline_bible(show))
+    res = ask(llm, cfg, "bible", Bible, lambda: offline_bible(show),
+              system_vars={"free_window": cfg["rank"]["free_window"], "trope_vocab": ", ".join(vocab)},
+              user_vars={"title": show.title, "n_episodes": len(show.episodes), "headers": headers_text(show)})
     out = res.model_dump()
     # tropes are a closed list: anything off-list is dropped here (and kept on record), never passed downstream
     out["tropes"] = list(dict.fromkeys(t for t in out["tropes"] if t in set(vocab)))
@@ -49,14 +47,20 @@ def run_bible(llm: LLM, show: Show, cfg: dict) -> dict:
         while a["id"] in seen:
             a["id"], k = f"{base}_{k}", k + 1
         seen.add(a["id"])
-    out["prompt_version"] = cfg["prompts"]["bible"]
-    out["model"] = llm.model_for("bible")
+    out.update(provenance(llm, cfg, "bible"))
     return out
 
 
 def show_tropes(bible: dict, cfg: dict) -> list[str]:
     """{{tropes}} for mining and linking: the bible's picks (falls back to the whole list if it picked none)."""
     return list(bible.get("tropes") or []) or list(cfg["vocab"]["tropes"])
+
+
+def vocab_vars(bible: dict, cfg: dict) -> tuple[list[str], list[str], dict]:
+    """(tropes, hook_types, prompt vars) shared by mining and linking: the schema enums and the prompt lists
+    must name the same labels."""
+    tropes, hook_types = show_tropes(bible, cfg), list(cfg["vocab"]["hook_types"])
+    return tropes, hook_types, {"hook_types": ", ".join(hook_types), "tropes": ", ".join([*tropes, "other"])}
 
 
 def arc_ids(bible: dict) -> list[str]:

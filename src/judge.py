@@ -12,7 +12,7 @@ import re
 
 from .bible import GENERIC_TITLES, _norm, strip_honorifics
 from .features import block_intensity, pace
-from .llm import LLM, fill, load_prompt
+from .llm import LLM, ask, provenance
 from .parse import EPS, Show
 from .schemas import JudgeVerdict
 
@@ -172,7 +172,7 @@ def offline_judge(show: Show, cand: dict) -> JudgeVerdict:
     off = 0.0
     for s in cand["segments"]:
         ep = show.ep(s["ep"])
-        for b in [*ep.lines, *ep.actions, *ep.sfx]:
+        for b in ep.beats:
             if s["start"] - EPS <= b.start < s["end"] and off + b.start - s["start"] <= 3.0:
                 first3 = max(first3, block_intensity(b)[0])
         off += s["end"] - s["start"]
@@ -202,9 +202,7 @@ def _row(row_map: list[dict], n) -> dict | None:
 
 def cold_judge(llm: LLM, show: Show, cand: dict, cfg: dict, cast: list[dict] | None) -> dict:
     text, row_map = render_clip(show, cand, cast, hook_s=cfg["promo"]["hook_max_s"])
-    system, user_t = load_prompt(cfg["prompts"]["judge"])
-    res = llm.complete_json(stage="judge", system=system, user=fill(user_t, clip=text), schema=JudgeVerdict,
-                            offline_fn=lambda: offline_judge(show, cand))
+    res = ask(llm, cfg, "judge", JudgeVerdict, lambda: offline_judge(show, cand), user_vars={"clip": text})
     v = res.model_dump()
     # the prompt's rule, enforced in code: a clip that answers itself or raises no question is not a cliffhanger
     rule = ("answered_in_clip" if v["answered_in_clip"]
@@ -229,8 +227,7 @@ def cold_judge(llm: LLM, show: Show, cand: dict, cfg: dict, cast: list[dict] | N
     v["pace_info"] = pace_info
     v["score"] = weighted_score(v, P, cfg["score"]["weights"])
     v["clip_sha"] = clip_sha(text)
-    v["model"] = llm.model_for("judge")
-    v["prompt_version"] = cfg["prompts"]["judge"]
+    v.update(provenance(llm, cfg, "judge"))
     return v
 
 

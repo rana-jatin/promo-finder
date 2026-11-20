@@ -389,3 +389,13 @@ def build_app(db_path: str | Path):
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
     return build_graph().compile(checkpointer=SqliteSaver(conn))
+
+
+def prepare_run(show_dir: str | Path, out_dir: str | Path, cfg: dict, llm, thread_id: str, *, duels: bool,
+                review: bool, fast: bool, episodes: list[int] | None = None) -> tuple[Any, dict, dict]:
+    """(app, run config, runtime context) for one thread: shared by run.py and the web runner."""
+    ctx = {"show_dir": str(show_dir), "out_dir": str(out_dir), "config": cfg, "run_duels": duels,
+           "enable_review": review, "fast": fast, "episodes": episodes, "llm": llm}
+    config = {"configurable": {"thread_id": thread_id}, "max_concurrency": cfg["run"]["max_concurrency"],
+              "recursion_limit": 300}
+    return build_app(Path(out_dir) / "runs.db"), config, ctx

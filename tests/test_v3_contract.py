@@ -10,6 +10,7 @@ import pytest
 from src.assemble import build
 from src.bible import clip_cast
 from src.features import show_features
+from src.io_utils import read_jsonl
 from src.parse import parse_show
 from tests.synthetic_show import make_show
 
@@ -120,7 +121,7 @@ def test_judge_clamps_cliffhanger_and_logs_the_clash(synth, cfg, tmp_path, monke
     llm, c = _fake_llm(monkeypatch, cfg, tmp_path, reply)
     v = cold_judge(llm, show, _cand(show, feats, c), c, [])
     assert v["cliffhanger_score"] == 2.0 and v["clash"] == {"rule": "answered_in_clip", "cliffhanger_score_given": 5.0}
-    log = [json.loads(x) for x in (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()]
+    log = read_jsonl(tmp_path / "calls.jsonl")
     assert any(r.get("event") == "judge_clash" for r in log)
     assert v["resolution_id"] and v["resolution_seg"] == 0  # [0] is a real row
     assert hard_fail(v, c) and not passes(v, c)

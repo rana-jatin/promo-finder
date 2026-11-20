@@ -6,9 +6,9 @@ from __future__ import annotations
 
 from typing import get_args
 
-from .bible import arc_ids, bible_brief, show_tropes
-from .features import block_intensity
-from .llm import LLM, fill, load_prompt
+from .bible import arc_ids, bible_brief, vocab_vars
+from .features import block_intensity, ends_open
+from .llm import LLM, ask, provenance
 from .parse import EPS, Block, Episode, Show, ep_of
 from .schemas import MineResult, Moment, mine_schema
 
@@ -118,7 +118,7 @@ def validate_mine(show: Show, ep_n: int, next_n: int | None, res: MineResult,
 def offline_mine(show: Show, ep: Episode, feats: dict, cfg: dict) -> MineResult:
     """No-LLM baseline: strongest keyword beat as hook, the most 'open' line 18-45 s later as cliff."""
     P = cfg["promo"]
-    scored = sorted(((block_intensity(b)[0], b) for b in [*ep.lines, *ep.actions, *ep.sfx]),
+    scored = sorted(((block_intensity(b)[0], b) for b in ep.beats),
                     key=lambda x: (-x[0], x[1].start))
     moments: list[Moment] = []
     used: list[tuple[float, float]] = []
@@ -131,8 +131,7 @@ def offline_mine(show: Show, ep: Episode, feats: dict, cfg: dict) -> MineResult:
                  if hook.start + P["min_dur"] - 3 <= ln.end <= hook.start + P["max_dur"] - 15]
 
         def openness(ln: Block) -> float:
-            t = ln.text.rstrip()
-            return block_intensity(ln)[0] + (0.3 if t.endswith(("?", "!", "...", "—", "-")) else 0.0)
+            return block_intensity(ln)[0] + (0.3 if ends_open(ln.text) else 0.0)
 
         if not cands:
             continue
@@ -149,16 +148,14 @@ def mine_episode(llm: LLM, show: Show, ep_n: int, next_n: int | None, bible: dic
                  cfg: dict) -> dict:
     ep = show.ep(ep_n)
     preview = cfg["promo"]["next_ep_preview_s"]
-    tropes, hook_types = show_tropes(bible, cfg), list(cfg["vocab"]["hook_types"])
-    system, user_t = load_prompt(cfg["prompts"]["mine"])
-    system = fill(system, hook_types=", ".join(hook_types), tropes=", ".join([*tropes, "other"]))
+    tropes, hook_types, vocab = vocab_vars(bible, cfg)
     nxt = show.ep(next_n) if next_n is not None and next_n in show.episodes else None
-    user = fill(user_t, bible=bible_brief(bible), ep=ep_n, duration=f"{ep.duration:.1f}",
-                timeline=render_timeline(ep, feats.get(ep_n)), preview_s=int(preview),
-                next_ep=next_n if nxt else "N/A",
-                next_timeline=render_timeline(nxt, feats.get(next_n), 0.0, preview) if nxt else "NONE")
-    res = llm.complete_json(stage="mine", system=system, user=user, schema=mine_schema(tropes, hook_types),
-                            offline_fn=lambda: offline_mine(show, ep, feats.get(ep_n, {}), cfg))
+    user = {"bible": bible_brief(bible), "ep": ep_n, "duration": f"{ep.duration:.1f}",
+            "timeline": render_timeline(ep, feats.get(ep_n)), "preview_s": int(preview),
+            "next_ep": next_n if nxt else "N/A",
+            "next_timeline": render_timeline(nxt, feats.get(next_n), 0.0, preview) if nxt else "NONE"}
+    res = ask(llm, cfg, "mine", mine_schema(tropes, hook_types),
+              lambda: offline_mine(show, ep, feats.get(ep_n, {}), cfg), system_vars=vocab, user_vars=user)
     res, dropped = validate_mine(show, ep_n, next_n if nxt else None, res, arc_ids(bible))
     return {"kind": "mine", "ep": ep_n, "next_ep": next_n if nxt else None, "result": res.model_dump(),
-            "dropped": dropped, "model": llm.model_for("mine"), "prompt_version": cfg["prompts"]["mine"]}
+            "dropped": dropped, **provenance(llm, cfg, "mine")}

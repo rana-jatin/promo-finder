@@ -3,8 +3,8 @@
 by the bible's arc ids, each with its nearby rows; the show context includes the spoiler list."""
 from __future__ import annotations
 
-from .bible import arc_ids, bible_brief, show_tropes
-from .llm import LLM, fill, load_prompt
+from .bible import arc_ids, bible_brief, vocab_vars
+from .llm import LLM, ask, provenance
 from .mine import render_timeline
 from .parse import EPS, Show, ep_of
 from .schemas import LinkResult, link_schema
@@ -85,15 +85,10 @@ def link_arcs(llm: LLM, show: Show, beats: list[dict], bible: dict, cfg: dict, m
     items = collect_beats(beats)
     if len({x["ep"] for x in items}) < 2:
         return {"kind": "link", "result": LinkResult().model_dump(), "dropped": [],
-                "skipped": "fewer than 2 episodes with setups/payoffs", "model": llm.model_for("link"),
-                "prompt_version": cfg["prompts"]["link"]}
-    tropes, hook_types = show_tropes(bible, cfg), list(cfg["vocab"]["hook_types"])
-    system, user_t = load_prompt(cfg["prompts"]["link"])
-    system = fill(system, max_stitches=max_stitches, free_window=cfg["rank"]["free_window"],
-                  hook_types=", ".join(hook_types), tropes=", ".join([*tropes, "other"]))
-    user = fill(user_t, bible=bible_brief(bible, with_spoilers=True), beats=beats_text(show, items, bible))
-    res = llm.complete_json(stage="link", system=system, user=user, schema=link_schema(tropes, hook_types),
-                            offline_fn=LinkResult)
+                "skipped": "fewer than 2 episodes with setups/payoffs", **provenance(llm, cfg, "link")}
+    tropes, hook_types, vocab = vocab_vars(bible, cfg)
+    res = ask(llm, cfg, "link", link_schema(tropes, hook_types), LinkResult,
+              system_vars={"max_stitches": max_stitches, "free_window": cfg["rank"]["free_window"], **vocab},
+              user_vars={"bible": bible_brief(bible, with_spoilers=True), "beats": beats_text(show, items, bible)})
     res, dropped = validate_stitches(show, res, arc_ids(bible))
-    return {"kind": "link", "result": res.model_dump(), "dropped": dropped, "model": llm.model_for("link"),
-            "prompt_version": cfg["prompts"]["link"]}
+    return {"kind": "link", "result": res.model_dump(), "dropped": dropped, **provenance(llm, cfg, "link")}

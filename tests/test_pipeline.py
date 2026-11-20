@@ -6,6 +6,7 @@ import pytest
 
 from src.assemble import build, extend_as_cold_open, iou, nudge, validate
 from src.features import show_features
+from src.io_utils import read_jsonl
 from src.parse import fmt_ts, parse_show
 from src.rank import bradley_terry, select
 from tests.synthetic_show import make_show
@@ -292,6 +293,6 @@ def test_graph_offline_end_to_end_with_review(tmp_path, cfg):
     ranked = json.loads((out / "ranked.json").read_text(encoding="utf-8"))
     assert ranked["promos"] and all(p["round_trip_ok"] for p in ranked["promos"])
     assert first not in [p["cand_id"] for p in ranked["promos"]]
-    decisions = [json.loads(x) for x in (out / "decisions.jsonl").read_text(encoding="utf-8").splitlines()]
+    decisions = read_jsonl(out / "decisions.jsonl")
     assert {d["action"] for d in decisions} >= {"reject", "nudge"}
     assert (out / "report.md").exists() and (out / "candidates.jsonl").exists()

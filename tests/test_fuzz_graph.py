@@ -9,6 +9,7 @@ import re
 import pytest
 
 from src.assemble import validate
+from src.io_utils import read_jsonl
 from src.parse import load_show
 from tests.conftest import PACK
 from tests.synthetic_show import make_show
@@ -137,8 +138,8 @@ def _run(show_dir, out, cfg, monkeypatch, review=True):
 def _check(out, c):
     show = load_show(out / "parsed.json")
     ranked = json.loads((out / "ranked.json").read_text(encoding="utf-8"))["promos"]
-    cands = [json.loads(x) for x in (out / "candidates.jsonl").read_text(encoding="utf-8").splitlines()]
-    pool = [json.loads(x) for x in (out / "pool.jsonl").read_text(encoding="utf-8").splitlines()]
+    cands = read_jsonl(out / "candidates.jsonl")
+    pool = read_jsonl(out / "pool.jsonl")
     assert pool, "fuzzed mining should assemble something"
     for p in ranked:
         assert p["round_trip_ok"], p["promo_id"]

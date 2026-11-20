@@ -136,6 +136,11 @@ class Episode:
     def all_blocks(self) -> list[Block]:
         return [*self.shots, *self.lines, *self.actions, *self.sfx, *self.others]
 
+    @property
+    def beats(self) -> list[Block]:
+        """Dialogue, action and sound rows: what a viewer reacts to (no camera rows)."""
+        return [*self.lines, *self.actions, *self.sfx]
+
     def block(self, bid: str) -> Block | None:
         return self._by_id.get(bid)
 

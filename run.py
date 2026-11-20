@@ -24,8 +24,8 @@ from langgraph.types import Command
 
 from src.config import load_config
 from src.editor import cli_review
-from src.graph import build_app
-from src.llm import LLM, QuotaExhausted
+from src.graph import prepare_run
+from src.llm import LLM, PROVIDER_HINTS, QuotaExhausted
 
 
 def parse_episodes(spec: str | None) -> list[int] | None:
@@ -121,15 +121,12 @@ def main() -> None:
     llm = LLM(cfg, call_log=out_dir / "llm_calls.jsonl")
     if not llm.offline:
         preflight(llm)
-    ctx = {"show_dir": str(show_dir), "out_dir": str(out_dir), "config": cfg, "run_duels": settings["duels"],
-           "enable_review": settings["review"], "fast": settings["fast"], "episodes": settings["episodes"], "llm": llm}
-    app = build_app(out_dir / "runs.db")
+    app, config, ctx = prepare_run(show_dir, out_dir, cfg, llm, thread_id, duels=settings["duels"],
+                                   review=settings["review"], fast=settings["fast"], episodes=settings["episodes"])
     try:
         (out_dir / "graph.mmd").write_text(app.get_graph(xray=1).draw_mermaid(), encoding="utf-8")
     except Exception:
         pass
-    config = {"configurable": {"thread_id": thread_id}, "max_concurrency": cfg["run"]["max_concurrency"],
-              "recursion_limit": 300}
     print(f"Promo Finder | show {show_dir} | thread {thread_id}\n  models: "
           + ("offline (heuristic baseline)" if llm.offline else "\n          ".join(llm.describe())) + "\n"
           f"  mode: fast={settings['fast']} duels={settings['duels']} review={settings['review']} "
@@ -173,13 +170,11 @@ def main() -> None:
         sys.exit(130)
     except Exception as e:  # turn provider errors into one actionable line
         kind = type(e).__name__
-        hints = {"AuthenticationError": "the API key was rejected: check .env",
-                 "NotFoundError": "model or deployment not found: check llm.routes / --model "
-                                  "(for Azure: AZURE_DEPLOYMENT and AZURE_API_BASE)",
-                 "PermissionDeniedError": "the key has no access to this model"}
-        if kind in hints:
-            print(f"\nStopped ({kind}): {hints[kind]}.\n{str(e)[:300]}\nProgress so far is saved; fix and run "
-                  f"again with --resume.")
+        where = {"AuthenticationError": " (in .env)",
+                 "NotFoundError": " (llm.routes / --model; for Azure: AZURE_DEPLOYMENT and AZURE_API_BASE)"}
+        if kind in PROVIDER_HINTS:
+            print(f"\nStopped ({kind}): {PROVIDER_HINTS[kind]}{where.get(kind, '')}.\n{str(e)[:300]}\n"
+                  f"Progress so far is saved; fix and run again with --resume.")
             sys.exit(3)
         raise
 

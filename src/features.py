@@ -92,6 +92,14 @@ def emotion_weight(emotions: list[str]) -> tuple[float, str]:
     return best
 
 
+OPEN_ENDINGS = ("?", "!", "...", "—", "-")
+
+
+def ends_open(text: str) -> bool:
+    """A line that trails off or asks: the shape of a cliffhanger line."""
+    return text.rstrip().endswith(OPEN_ENDINGS)
+
+
 def block_intensity(b: Block) -> tuple[float, list[str]]:
     """Intensity in [0, 1] plus short tags for one block."""
     tags: list[str] = []
@@ -183,7 +191,7 @@ def pace(show: Show, cand: dict) -> tuple[float, dict]:
     offset = 0.0
     for s in cand["segments"]:
         ep = show.ep(s["ep"])
-        for b in [*ep.lines, *ep.actions, *ep.sfx]:
+        for b in ep.beats:
             a, z = max(b.start, s["start"]), min(b.end, s["end"])
             if z > a + EPS:
                 covered.append((offset + a - s["start"], offset + z - s["start"]))

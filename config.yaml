@@ -1,0 +1,123 @@
+# Promo Finder config. Every number here is an assumption you can tune; nothing is hard-coded.
+
+llm:
+  # Each stage runs on the first model of its route. A daily-quota error moves the route to its next
+  # model for the rest of the run; a content-filter refusal skips to the next model for that call only.
+  # Model names are LiteLLM strings; ${VAR} is read from the environment / .env.
+  # Prices are paid-tier USD per 1M tokens (input / output, thinking billed as output), checked 2026-11-20.
+  routes:
+    context:               # the two once-per-season calls that shape everything: show bible + season-wide linking
+      stages: [bible, link]
+      models:              # Gemini (large context window)
+        - name: gemini/gemini-4-hydrogen         # $1.50 / $7.50
+          rpm: 10
+          timeout_s: 600
+          extra: &gemini_safety
+            safety_settings:   # microdrama slaps, threats and insults are fiction: do not block them
+              - {category: HARM_CATEGORY_HARASSMENT, threshold: BLOCK_NONE}
+              - {category: HARM_CATEGORY_HATE_SPEECH, threshold: BLOCK_NONE}
+              - {category: HARM_CATEGORY_DANGEROUS_CONTENT, threshold: BLOCK_NONE}
+              - {category: HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: BLOCK_NONE}
+        - name: gemini/gemini-3.8-flash          # fallback: daily cap, outage, or a safety block
+          rpm: 10
+          timeout_s: 600
+          extra: *gemini_safety
+        - name: groq/openai/gpt-oss-120b         # $0.15 / $0.60; last resort (131k context, prompts measured <= 15k)
+          rpm: 20
+    mine:                  # per-episode mining (50 calls a run, with the show bible as context)
+      stages: [mine]
+      models:
+        # pinned, not the gemini-flash-latest alias (which moves forward), so runs stay comparable.
+        - name: gemini/gemini-3.8-flash          # $0.75 / $3.75 through 2026-12-31, then $1.50 / $7.50
+          rpm: 10
+          timeout_s: 600   # free-tier Flash measured at 70-170 s per call (queueing, not prompt size)
+          extra: *gemini_safety
+        - name: gemini/gemini-flash-lite-latest  # $0.30 / $2.50; separate quota, used once Flash hits its daily cap
+          rpm: 15
+          timeout_s: 600
+          extra: *gemini_safety
+        - name: groq/openai/gpt-oss-120b         # $0.15 / $0.60; last resort if both Gemini models are capped or refuse
+          rpm: 20
+    judge:                 # short cold prompts: the judge (and its eval checks) and the pairwise duels
+      stages: [judge, duel]
+      models:
+        - name: openai/gpt-6-luna                # $0.10 / $0.50; OpenAI direct, key read from OPEN_API_KEY
+          api_key_env: OPEN_API_KEY
+          rpm: 60
+        - name: groq/qwen/qwen3.8-27b            # $0.80 / $4.00; fallback: cap, outage, or a refusal
+          rpm: 20
+        - name: groq/openai/gpt-oss-120b         # $0.15 / $0.60; last resort
+          rpm: 20
+  # Set llm.model (or --model) to force ONE model for every stage, e.g. offline, or an API Kuku provides.
+  #   offline = no API at all: heuristic baseline (tests, dry runs, "is the LLM worth it" check)
+  model: null
+  fallbacks: []            # only used together with llm.model
+  temperature: 0.2
+  rpm: 10                  # default requests/minute when a model entry does not set its own
+  timeout_s: 180
+  max_retries: 5           # transient errors and per-minute 429s
+  json_mode: true          # ask the provider for JSON; output is schema-validated either way
+  extra: {}                # passed straight to litellm.completion, e.g. {reasoning_effort: low}
+  # generous caps: "thinking" models spend output tokens before the JSON; unused tokens cost nothing.
+  # Measured 2026-11-20: gpt-5-nano used all 4000 on 4 of 64 judge calls and returned NOTHING; Gemini Flash
+  # used all 8000 on a link call and cut the JSON off. Not part of the cache key: changing these keeps cache hits.
+  max_tokens: {bible: 8000, mine: 12000, link: 16000, judge: 8000, duel: 6000}
+  max_tokens_cap: 32000    # an empty "length" reply is retried with double the budget up to this, then the fallback
+  cache_dir: .cache/llm    # prompt-hash cache: reruns and resumes cost 0 calls
+  # Used for the cost estimate only when LiteLLM has no price for the model. Assumed flash-tier
+  # paid rates in USD per 1M tokens; check current pricing before quoting a number.
+  price_per_mtok: {input: 0.30, output: 2.50}
+
+prompts:                   # versioned prompt files in prompts/; the version is written into every output
+  bible: bible_v1
+  mine: mine_v1
+  link: link_v1
+  judge: judge_v1
+  duel: duel_v1
+
+run:
+  max_concurrency: 10      # parallel workers in fan-outs; slow Gemini calls overlap (rpm caps still apply)
+  judge_batch: 40          # candidates judged per batch; a second batch runs only if <10 pass
+  fast_episodes: 10        # --fast: top episodes by Stage 1 heat
+  fast_judge: 15           # --fast: candidates judged
+
+promo:
+  min_dur: 20.0
+  max_dur: 60.0
+  max_segments: 4
+  min_segment: 2.0
+  hook_max_s: 3.0          # hook beat must start within this many seconds of the clip start
+  cliff_max_tail_s: 1.5    # clip must end within this many seconds after the cliffhanger beat
+  pre_pad_s: 0.2           # tier 2: start this long before the first line
+  post_pad_s: 0.3          # tier 2: end this long after the last line
+  snap_to_shot_end_s: 0.4  # tier 2: snap to the shot end when it is this close
+  flash_min_s: 0.5         # no shot fragment shorter than this at either clip edge
+  cold_open_flash: [2.0, 4.0]
+  next_ep_preview_s: 20.0  # mining sees the first N seconds of the next episode (bridges)
+
+score:
+  # S = 0.30 H + 0.25 C + 0.20 A + 0.15 T + 0.10 P - penalties   (all on a 1-5 scale)
+  weights: {hook: 0.30, cliff: 0.25, standalone: 0.20, trope: 0.15, pace: 0.10}
+  min_score: 3.5           # absolute floor: "no promo" beats a forced pick
+  max_repair_rounds: 2
+  hard_fails: [answered_in_clip, no_open_question]
+
+penalties:
+  per_extra_segment: 0.15  # each segment beyond 2 (jump-cut cost)
+  heading_mismatch: 0.10   # INT/EXT or DAY/NIGHT changes across a stitch
+  outside_sweet_spot: 0.10 # soft: outside the sweet spot below
+  sweet_spot: [30.0, 45.0]
+  spoiler: 0.50            # contains a late twist the bible lists
+
+select:
+  shortlist: 10
+  reserve: 10
+  iou_dedupe: 0.5
+  max_per_episode: 2
+  max_per_trope: 3
+
+rank:
+  free_window: 10          # assumed free episodes: viewers who click land in Ep 1, so early hooks pay off fast
+  funnel_boost: 0.5        # added (in z-score units) to promos fully inside the free window
+  spoiler_holdback: 1.0    # subtracted for spoiler promos
+  duel_rounds: 3           # Swiss rounds x 5 pairs x both orders = 30 calls on the top 10

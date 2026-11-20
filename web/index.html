@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Promo Finder</title>
+  <meta name="description" content="Finds, judges and ranks promo clips in timestamped microdrama screenplays (LangGraph pipeline with an editor review step).">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23c2410c'/><path d='M11 9l13 7-13 7z' fill='white'/></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">▶</span>
+    <div>
+      <h1>Promo Finder</h1>
+      <p class="sub">Screenplays in, ranked 20–60 s promos out: parse → bible → mine → judge &amp; repair → rank → editor review</p>
+    </div>
+  </div>
+  <div class="top-links">
+    <a id="repo-link" href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
+    <a href="/api/docs" target="_blank" rel="noopener">API</a>
+  </div>
+</header>
+
+<div id="wake" class="wake" hidden>Waking up the server… free instances sleep after 15 minutes idle (about a minute).</div>
+
+<div class="layout">
+  <aside class="side" aria-label="Run settings">
+    <section>
+      <h2>Engine</h2>
+      <label class="radio"><input type="radio" name="engine" value="cloud" checked>
+        <span><b>Server models</b><small>Gemini Flash-Lite + Groq gpt-oss-120b. Sample show replays from cache.</small></span></label>
+      <label class="radio"><input type="radio" name="engine" value="custom">
+        <span><b>Your own API key</b><small>Any LiteLLM model, one model for every stage. The key is used for this run only and never stored.</small></span></label>
+      <label class="radio"><input type="radio" name="engine" value="offline">
+        <span><b>Offline baseline</b><small>No API: keyword heuristics. Shows the pipeline and validators, not judgement.</small></span></label>
+    </section>
+
+    <section id="custom-box" hidden>
+      <label class="field">Model
+        <select id="model-select"></select>
+      </label>
+      <label class="field" id="custom-model-wrap" hidden>LiteLLM model string
+        <input id="custom-model" placeholder="provider/model-name" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field">API key
+        <input id="api-key" type="password" placeholder="pasted key stays in this tab" autocomplete="off">
+      </label>
+    </section>
+
+    <section>
+      <h2>Mode</h2>
+      <div class="seg" role="radiogroup" aria-label="Run mode">
+        <label><input type="radio" name="mode" value="fast" checked><span>Fast</span></label>
+        <label><input type="radio" name="mode" value="full"><span>Full</span></label>
+      </div>
+      <small class="hint">Fast: judge the top 15 candidates. Full: judge up to 40 (more calls).</small>
+      <label class="check"><input type="checkbox" id="duels"> Enable pairwise duels <small>(+30 calls)</small></label>
+      <div class="field">Max repair rounds
+        <div class="seg" role="radiogroup" aria-label="Max repair rounds">
+          <label><input type="radio" name="repair" value="0"><span>0</span></label>
+          <label><input type="radio" name="repair" value="1" checked><span>1</span></label>
+          <label><input type="radio" name="repair" value="2"><span>2</span></label>
+        </div>
+      </div>
+    </section>
+
+    <details class="pass">
+      <summary>Demo passcode</summary>
+      <input id="passcode" type="password" placeholder="unlocks uploads on server models" autocomplete="off">
+    </details>
+    <p class="hint" id="server-note"></p>
+  </aside>
+
+  <main>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="run" aria-selected="true">1 · Upload &amp; Run</button>
+      <button role="tab" data-tab="review" aria-selected="false">2 · Editor Review <span id="review-dot" class="dot" hidden></span></button>
+      <button role="tab" data-tab="quality" aria-selected="false">3 · Quality &amp; Exports</button>
+    </nav>
+
+    <section class="panel" id="tab-run" role="tabpanel">
+      <div class="sources">
+        <div class="card source">
+          <h3>Sample show</h3>
+          <p id="sample-desc">Three invented episodes (no real show content).</p>
+          <button class="btn primary" id="run-sample">Load 3 sample episodes &amp; run</button>
+        </div>
+        <div class="card source">
+          <h3>Your screenplays</h3>
+          <label id="drop" class="drop" tabindex="0">
+            <input type="file" id="files" accept=".txt,text/plain" multiple hidden>
+            <span>Drop episode <code>.txt</code> files here or <u>browse</u></span>
+            <small id="limits"></small>
+          </label>
+          <ul id="file-list" class="file-list"></ul>
+          <input id="title" class="title-in" placeholder="Show title (optional)">
+          <button class="btn" id="run-upload" disabled>Run on uploaded episodes</button>
+        </div>
+      </div>
+
+      <div id="status" class="status" hidden></div>
+
+      <div id="progress" class="card" hidden>
+        <div class="prog-head">
+          <h3>Pipeline</h3>
+          <span id="elapsed" class="muted"></span>
+        </div>
+        <ol id="stages" class="stages"></ol>
+        <div id="models" class="models"></div>
+        <details class="log-wrap" open>
+          <summary>Event log</summary>
+          <ol id="log" class="log"></ol>
+        </details>
+      </div>
+    </section>
+
+    <section class="panel" id="tab-review" role="tabpanel" hidden>
+      <div id="review-empty" class="empty">Run the pipeline first. When it reaches the editor step, the top promos appear here for review.</div>
+      <div id="review-box" hidden>
+        <div class="review-head">
+          <div>
+            <h3 id="review-title">Editor review</h3>
+            <p class="muted">Approve, reject with a reason, or nudge a cut. Rejected promos are backfilled from the reserve and the graph re-ranks. Nudges snap to the nearest legal cut and are re-validated; an invalid nudge is dropped.</p>
+          </div>
+          <button class="btn primary" id="resume">Resume graph</button>
+        </div>
+        <div id="cards" class="cards"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="tab-quality" role="tabpanel" hidden>
+      <div id="quality-empty" class="empty">Quality numbers and downloads appear once a run has written its outputs.</div>
+      <div id="quality-box" hidden>
+        <div id="tiles" class="tiles"></div>
+        <div class="two">
+          <div class="card"><h3>First-pass judge verdicts</h3><div id="fails" class="bars"></div></div>
+          <div class="card"><h3>Downloads</h3><div id="downloads" class="downloads"></div></div>
+        </div>
+        <div class="card"><h3>report.md</h3><div id="report" class="report"></div></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<footer class="foot">Hosted demo runs at most 6 episodes. Run a full show locally with <code>python run.py --show &lt;folder&gt;</code>.</footer>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "_how_to_label": [
+    "Copy this file to eval/gold.json and fill it in BEFORE you look at any tool output.",
+    "Pick ~8 episodes (mix of hot and quiet ones). Print each with: python -m src.parse data/show1 --episode 7",
+    "For every promo you would post, write its segments in playback order with MM:SS.ss times.",
+    "List episodes with no promo worth posting under negative_episodes (keep them in labelled_episodes too).",
+    "Precision@10 only counts tool promos whose episodes are all in labelled_episodes."
+  ],
+  "show": "show1",
+  "labelled_by": "",
+  "labelled_at": "",
+  "labelled_episodes": [],
+  "negative_episodes": [],
+  "promos": [
+    {
+      "id": "G1",
+      "segments": [{"episode": 0, "start": "00:00.00", "end": "00:00.00"}],
+      "hook": "",
+      "cliffhanger": "",
+      "note": ""
+    }
+  ]
+}

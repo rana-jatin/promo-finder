@@ -1,0 +1,19 @@
+# Kuku's screenplay pack is confidential: never commit it, or anything that quotes it.
+data/
+outputs/
+raw_outputs/
+eval/gold.json
+eval/label_pack/
+eval/drafts/
+solution_doc_notes.md
+.cache/
+
+# Web app working folder (runs, uploads, cache) when run locally
+.web/
+
+# Secrets and environments
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

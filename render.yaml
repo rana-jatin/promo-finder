@@ -1,0 +1,27 @@
+# Render Blueprint: one free web service runs the API and serves the page (web/).
+# Render dashboard -> New -> Blueprint -> pick this repo. It asks for the three secret values below.
+services:
+  - type: web
+    name: promo-finder
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: PROMO_WORK_DIR
+        value: /tmp/promo
+      - key: RUN_WORKERS
+        value: "2"
+      - key: RUNS_PER_HOUR
+        value: "8"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: DEMO_PASSCODE
+        sync: false

@@ -332,7 +332,7 @@ Three layers of checks, from cheapest to most telling:
 | Spoiler flags raised | – | 12 | **4** |
 | Cost per full run (est.) | ~$0.25* | $1.40 | **$1.59** |
 
-\* v1 mined most episodes on the cheaper Flash-Lite after the free Flash quota ran out.
+\* v1 mined most episodes on the cheaper Flash-Lite after the Flash daily quota ran out.
 
 **What this says:**
 

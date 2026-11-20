@@ -44,7 +44,7 @@ llm:
         - name: gemini/gemini-3.8-flash          # $0.75 / $3.75 through 2026-12-31, then $1.50 / $7.50
           api_key_env: GEMINI_API_KEY
           rpm: 10
-          timeout_s: 600   # free-tier Flash measured at 70-170 s per call (queueing, not prompt size)
+          timeout_s: 600   # calls measured at 30-170 s; the long timeout also covers a hung connection before retrying
           extra: *gemini_safety
         - name: gemini/gemini-3.8-flash          # same model, 2nd key
           api_key_env: GEMINI_API_KEY_1

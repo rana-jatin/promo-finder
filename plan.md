@@ -139,7 +139,7 @@ Without those, I'd have no way to say whether any of it works.
 - **I moved orchestration to LangGraph** once the flow had real branches: a fan-out per episode,
   a judge-repair loop, a "not enough passed, judge another batch" check, and an editor pause that
   has to survive a restart. Every stage inside is still plain Python.
-- **Models moved around a lot.** Free Gemini Flash ran out of daily quota partway through the
+- **Models moved around a lot.** Gemini Flash ran out of daily quota partway through the
   first run. One provider's content filter blocked a few judge calls on scripted violence. One
   judge model passed almost everything. The next rejected most good clips. So the adapter now has
   fallback chains per stage group, moves to the next model on a daily cap or a refusal, and records

@@ -114,6 +114,7 @@ async function startRun(source) {
   showStatus("running", "Starting run…");
   try {
     const { run_id } = await api("/api/runs", { method: "POST", body: fd });
+    S.watching = true; // a sample replay can finish before the first poll ever sees it running
     attach(run_id);
   } catch (e) {
     showStatus("error", esc(e.message));
@@ -146,6 +147,7 @@ async function poll() {
   S.last = snap;
   renderProgress(snap);
   if (snap.status === "queued" || snap.status === "running") {
+    S.watching = true;
     setBusy(true);
     S.timer = setTimeout(poll, 1500);
     return;
@@ -153,6 +155,19 @@ async function poll() {
   setBusy(false);
   if (snap.status === "review") renderReview(snap.review);
   if (snap.status === "done") { renderReviewDone(); loadQuality(); }
+  autoAdvance(snap);
+}
+
+// Move the editor to the next step when a run this tab saw working reaches it (not when a finished run is reopened
+// from a link), and only if they are still on the Run tab.
+function autoAdvance(snap) {
+  const target = snap.status === "review" ? "review" : snap.status === "done" ? "quality" : null;
+  if (!target || !S.watching) return;
+  S.watching = false;
+  if (!$("#tab-run").hidden) {
+    showTab(target);
+    window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  }
 }
 
 function setBusy(b) {
@@ -169,6 +184,13 @@ function showStatus(kind, html) {
 
 const STAGE_LABEL = { parse: "Parse", bible: "Bible", mine: "Mine", link: "Link arcs", assemble: "Assemble",
   refine: "Judge + repair", coverage: "Coverage", select: "Select", duel: "Duels", order: "Rank", write: "Write", editor: "Editor" };
+// Plain-language line for the stage that is running now (also the stepper tooltip).
+const STAGE_HELP = { parse: "Reading the screenplays line by line", bible: "Writing the show bible: characters, secrets, recurring tropes",
+  mine: "Finding hooks, reveals and cliffhangers in each episode", link: "Linking set-ups to their pay-offs across episodes",
+  assemble: "Cutting 20–60 s candidate promos and checking the rules in code", refine: "Scoring each cut cold and repairing the weak ones",
+  coverage: "Making sure the shortlist covers different episodes and story arcs", select: "Choosing the shortlist and the reserve",
+  duel: "Comparing finalists head-to-head", order: "Putting the promos in posting order", write: "Writing the report and output files",
+  editor: "Waiting for you to review the shortlist" };
 
 function renderProgress(s) {
   const lastActive = s.stages.reduce((k, st, i) => (st.state !== "pending" ? i : k), -1);
@@ -177,8 +199,13 @@ function renderProgress(s) {
     const state = skipped ? "skipped" : st.state;
     const mark = state === "done" ? "✓" : state === "waiting" ? "❚❚" : skipped ? "–" : String(i + 1);
     const cnt = skipped ? "skipped" : st.started > 1 ? `${st.finished}/${st.started}` : "";
-    return `<li class="${state}"><span class="node">${mark}</span><span>${esc(STAGE_LABEL[st.name] || st.name)}</span><span class="cnt">${esc(cnt)}</span></li>`;
+    return `<li class="${state}" title="${esc(STAGE_HELP[st.name] || "")}"><span class="node">${mark}</span><span>${esc(STAGE_LABEL[st.name] || st.name)}</span><span class="cnt">${esc(cnt)}</span></li>`;
   }).join("");
+  const done = s.stages.filter((st) => st.state === "done").length;
+  const cur = s.stages.find((st) => st.state === "running" || st.state === "waiting");
+  $("#now").innerHTML = s.status === "running" || s.status === "queued"
+    ? `<b>Step ${Math.min(done + 1, s.stages.length)} of ${s.stages.length}:</b> ${esc(cur ? (STAGE_HELP[cur.name] || STAGE_LABEL[cur.name] || cur.name) : "Starting")}…`
+    : "";
   $("#log").innerHTML = s.log.map((l) => `<li><span>${l.t.toFixed(1)}s</span>${esc(l.msg)}</li>`).join("");
   const logEl = $("#log");
   logEl.scrollTop = logEl.scrollHeight;
@@ -187,9 +214,9 @@ function renderProgress(s) {
   $("#elapsed").innerHTML = runCostLine(s);
   const msg = {
     queued: "Queued: waiting for a free worker…",
-    running: "Running the graph. You can switch tabs; progress keeps updating.",
-    review: `<span>Your shortlist is ready for review (round ${(s.review ? s.review.round : 0) + 1}).</span><button class="btn small primary" data-go="review">Open review</button>`,
-    done: `<span>Done. Final ranking written.</span><button class="btn small" data-go="quality">Quality &amp; downloads</button>`,
+    running: "Working on it. You can switch tabs or leave this page open; progress keeps updating.",
+    review: `<span>Your shortlist is ready to review (round ${(s.review ? s.review.round : 0) + 1}).</span><button class="btn small primary" data-go="review">Review promos</button>`,
+    done: `<span>Done. The final ranking is ready.</span><button class="btn small primary" data-go="quality">See results &amp; downloads</button>`,
     error: "Stopped: " + esc(s.error || "unknown error"),
   }[s.status];
   showStatus(s.status, msg);
@@ -279,8 +306,10 @@ function clipStrip(p) {
 
 function rings(sc) {
   if (!sc) return "";
-  const rows = [["Hook", sc.hook], ["Cliff", sc.cliff], ["Alone", sc.standalone], ["Trope", sc.trope], ["Pace", sc.pace]];
-  return `<div class="scores">${rows.map(([k, v]) => `<div class="score"><div class="ring" style="--p:${Math.max(0, Math.min(100, ((v || 0) / 5) * 100))}"><span>${(v ?? 0).toFixed(1)}</span></div>${k}</div>`).join("")}</div>`;
+  const rows = [["Hook", sc.hook, "How fast the opening grabs attention"], ["Cliff", sc.cliff, "How strongly the ending makes you want the next episode"],
+    ["Alone", sc.standalone, "Makes sense to someone who has never seen the show"], ["Trope", sc.trope, "How clearly it sells a popular story trope"],
+    ["Pace", sc.pace, "No slow or dead moments"]];
+  return `<div class="scores">${rows.map(([k, v, help]) => `<div class="score" title="${esc(help)}: ${(v ?? 0).toFixed(1)} / 5"><div class="ring" style="--p:${Math.max(0, Math.min(100, ((v || 0) / 5) * 100))}"><span>${(v ?? 0).toFixed(1)}</span></div>${k}</div>`).join("")}</div>`;
 }
 
 function renderReview(review) {
@@ -356,7 +385,7 @@ function renderReviewDone() {
     $("#resume").disabled = true;
     $("#approve-rest").disabled = true;
     $("#resume").textContent = "Finalized";
-    $("#review-title").textContent = "Review finished. The final ranking is in Quality & exports.";
+    $("#review-title").textContent = "Review finished. The final ranking is in Results & downloads.";
     $("#decision-sum").textContent = "";
     $("#reserve-note").hidden = true;
   }
@@ -424,6 +453,7 @@ async function resume() {
   try {
     await api(`/api/runs/${S.runId}/resume`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decisions }) });
     S.reviewKey = null;
+    S.watching = true;
     $("#review-title").textContent = "Resuming: backfilling and re-ranking…";
     showTab("run");
     poll();
@@ -530,6 +560,11 @@ async function boot() {
   const m = location.hash.match(/run=([a-f0-9]+)/);
   if (m) attach(m[1]);
   if (t) showTab(t[1]);
+  // "Try the sample show" on the landing page links to app.html#sample: start it straight away.
+  if (!m && /^#sample\b/.test(location.hash)) {
+    history.replaceState(null, "", location.pathname);
+    startRun("sample");
+  }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -547,6 +582,7 @@ document.addEventListener("DOMContentLoaded", () => {
   ["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
   drop.addEventListener("drop", (e) => setFiles(e.dataTransfer.files));
   $("#status").addEventListener("click", (e) => { const go = e.target.closest("[data-go]"); if (go) showTab(go.dataset.go); });
+  $$("[data-start]").forEach((b) => b.addEventListener("click", () => { showTab("run"); startRun(b.dataset.start); }));
   $("#cards").addEventListener("click", (e) => {
     const b = e.target.closest("[data-act]");
     if (b) setAction(b.closest(".promo"), b.dataset.act);

@@ -98,6 +98,9 @@ def test_api_policy(monkeypatch, tmp_path):
     c = TestClient(server.app)
     assert c.get("/api/health").json()["ok"]
     assert c.get("/").status_code == 200
+    assert "Open the studio" in c.get("/").text  # landing page
+    studio = c.get("/app.html")
+    assert studio.status_code == 200 and 'id="run-sample"' in studio.text
     one = {"files": ("episode-001-demo.txt", (SAMPLE / "episode-001-demo.txt").read_bytes(), "text/plain")}
     r = c.post("/api/runs", data={"settings": json.dumps({"engine": "custom", "source": "sample", "model": "groq/x"})})
     assert r.status_code == 403

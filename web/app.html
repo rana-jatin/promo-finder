@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Promo Finder</title>
+  <meta name="description" content="Finds, judges and ranks 20–60 s promo clips in timestamped microdrama screenplays, with an editor review step.">
+  <meta name="theme-color" content="#0b0b0c">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script>
+    try { const t = localStorage.getItem("pf:theme"); if (t) document.documentElement.dataset.theme = JSON.parse(t); } catch {}
+  </script>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="./" aria-label="Promo Finder home">
+    <img class="logo" src="kuku-logo.png" width="40" height="40" alt="">
+    <div class="brand-text">
+      <h1>Promo Finder</h1>
+      <span class="tag">Studio</span>
+    </div>
+  </a>
+  <div class="top-actions">
+    <a class="ghost-link" href="./#how">How it works</a>
+    <a id="repo-link" class="ghost-link" href="https://github.com/rana-jatin/promo-finder" target="_blank" rel="noopener">GitHub</a>
+    <a class="ghost-link" href="/api/docs" target="_blank" rel="noopener">API</a>
+    <button id="theme" class="icon-btn" type="button" aria-label="Toggle light or dark theme" title="Toggle theme">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 0 1-4.4 2.26 5.4 5.4 0 0 1-3.14-9.8A9.2 9.2 0 0 0 12 3z"/></svg>
+    </button>
+  </div>
+</header>
+
+<div id="wake" class="wake" hidden><span class="spinner" aria-hidden="true"></span>Waking up the server. Free instances sleep after 15 minutes idle; this takes about a minute.</div>
+
+<section class="hero slim">
+  <div class="hero-copy">
+    <h2>Promo studio</h2>
+    <p class="lede">Pick episodes and press run. When the shortlist is ready you review each promo, then download the final ranking.</p>
+  </div>
+  <ol class="journey" aria-label="What happens">
+    <li><span>1</span>Run</li>
+    <li><span>2</span>Review</li>
+    <li><span>3</span>Download</li>
+  </ol>
+</section>
+
+<div class="layout" id="layout">
+  <aside class="side" aria-label="Run settings">
+    <section class="panel-box">
+      <h3 class="label">Which AI runs it</h3>
+      <label class="choice"><input type="radio" name="engine" value="cloud" checked>
+        <span class="choice-body"><b>Server models <em class="rec">Recommended</em></b><small>Gemini reads, OpenAI judges, Groq steps in if either fails. The sample show replays instantly and costs nothing.</small></span></label>
+      <label class="choice"><input type="radio" name="engine" value="custom">
+        <span class="choice-body"><b>Your own API key</b><small>Any LiteLLM model. The key is used for this run only and never stored.</small></span></label>
+      <label class="choice"><input type="radio" name="engine" value="offline">
+        <span class="choice-body"><b>Offline baseline</b><small>No AI calls. Keyword rules show how the pipeline works, not how good its judgement is.</small></span></label>
+
+      <div id="custom-box" class="sub-box" hidden>
+        <label class="field">Model
+          <select id="model-select"></select>
+        </label>
+        <label class="field" id="custom-model-wrap" hidden>LiteLLM model string
+          <input id="custom-model" placeholder="provider/model-name" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="field">API key
+          <input id="api-key" type="password" placeholder="Stays in this tab" autocomplete="off">
+        </label>
+      </div>
+    </section>
+
+    <section class="panel-box">
+      <h3 class="label">How thorough</h3>
+      <div class="seg" role="radiogroup" aria-label="How thorough">
+        <label><input type="radio" name="mode" value="fast" checked><span>Fast</span></label>
+        <label><input type="radio" name="mode" value="full"><span>Full</span></label>
+      </div>
+      <small class="hint">Fast scores the best 15 candidate cuts. Full scores up to 40: slower, and costs more.</small>
+
+      <details class="adv" id="adv">
+        <summary>Advanced</summary>
+        <label class="toggle"><input type="checkbox" id="duels"><span class="track" aria-hidden="true"></span>
+          <span>Head-to-head duels <small>about 30 more AI calls</small></span></label>
+        <small class="hint">Compares the finalists in pairs to settle the final order.</small>
+
+        <div class="field">Repair attempts per weak cut
+          <div class="seg" role="radiogroup" aria-label="Repair attempts per weak cut">
+            <label><input type="radio" name="repair" value="0"><span>0</span></label>
+            <label><input type="radio" name="repair" value="1" checked><span>1</span></label>
+            <label><input type="radio" name="repair" value="2"><span>2</span></label>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <details class="panel-box pass">
+      <summary>Demo passcode</summary>
+      <small class="hint">Only needed to run your own uploads on the server models. The sample show does not need it.</small>
+      <input id="passcode" type="password" placeholder="Passcode" autocomplete="off">
+    </details>
+    <p class="hint" id="server-note"></p>
+  </aside>
+
+  <main>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button role="tab" data-tab="run" aria-selected="true"><span class="num">1</span>Run</button>
+      <button role="tab" data-tab="review" aria-selected="false"><span class="num">2</span>Review promos<span id="review-dot" class="dot" hidden></span></button>
+      <button role="tab" data-tab="quality" aria-selected="false"><span class="num">3</span>Results &amp; downloads</button>
+    </nav>
+
+    <section class="tabpanel" id="tab-run" role="tabpanel">
+      <div class="sources">
+        <article class="source sample">
+          <div class="poster has-img" aria-hidden="true">
+            <img src="sample-poster.jpg" width="522" height="974" alt="" decoding="async">
+            <!-- the title is printed on the image; app.js still fills this in for the text-only fallback -->
+            <span class="poster-title" id="sample-title">Sample show</span>
+          </div>
+          <div class="source-body">
+            <h3>Try the sample show</h3>
+            <p id="sample-desc">Three invented episodes, no real show content.</p>
+            <button class="btn primary" id="run-sample">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M8 5.5l11 6.5-11 6.5z" fill="currentColor"/></svg>
+              Run on 3 sample episodes</button>
+          </div>
+        </article>
+        <article class="source">
+          <h3>Your screenplays</h3>
+          <label id="drop" class="drop" tabindex="0">
+            <input type="file" id="files" accept=".txt,text/plain" multiple hidden>
+            <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="M12 3l5 5h-3v6h-4V8H7zm-7 14h14v4H5z"/></svg>
+            <span>Drop episode <code>.txt</code> files or <u>browse</u></span>
+            <small id="limits"></small>
+          </label>
+          <ul id="file-list" class="file-list"></ul>
+          <input id="title" class="title-in" placeholder="Show title (optional)">
+          <button class="btn" id="run-upload" disabled>Run on uploaded episodes</button>
+        </article>
+      </div>
+
+      <div id="status" class="status" hidden></div>
+
+      <div id="progress" class="card" hidden>
+        <div class="prog-head">
+          <h3>Pipeline</h3>
+          <span id="elapsed" class="meta"></span>
+        </div>
+        <p id="now" class="now" aria-live="polite"></p>
+        <ol id="stages" class="stepper"></ol>
+        <details class="log-wrap">
+          <summary>Model routing</summary>
+          <div id="models" class="models"></div>
+        </details>
+        <details class="log-wrap">
+          <summary>Event log</summary>
+          <ol id="log" class="log"></ol>
+        </details>
+        <details class="log-wrap" id="raw-wrap">
+          <summary>Raw outputs</summary>
+          <div class="raw-bar">
+            <select id="raw-file" aria-label="Output file"></select>
+            <span id="raw-meta" class="meta"></span>
+            <a id="raw-dl" class="ghost-link" download hidden>Download</a>
+          </div>
+          <pre id="raw" class="raw" tabindex="0">No output files yet. They appear as each stage writes them.</pre>
+        </details>
+      </div>
+    </section>
+
+    <section class="tabpanel" id="tab-review" role="tabpanel" hidden>
+      <div id="review-empty" class="empty">
+        <div class="empty-art" aria-hidden="true"><i></i><i></i><i></i></div>
+        <h3>No promos to review yet</h3>
+        <p>Start a run first. When the shortlist is ready, this tab opens by itself and shows each promo as a card.</p>
+        <button class="btn primary empty-cta" data-start="sample">Run the sample show</button>
+      </div>
+      <div id="review-box" hidden>
+        <div class="review-head">
+          <div>
+            <h3 id="review-title">Editor review</h3>
+            <ul class="how-review">
+              <li><b class="g">Approve</b> keeps the promo as it is.</li>
+              <li><b class="r">Reject</b> removes it. A promo from the reserve takes its place and the list is re-ranked.</li>
+              <li><b class="w">Nudge</b> moves a start or end time. The new cut snaps to the nearest valid point and is checked again; if it fails, the nudge is dropped.</li>
+            </ul>
+            <p id="reserve-note" class="reserve-note" hidden></p>
+          </div>
+        </div>
+        <div class="decision-bar">
+          <div id="decision-sum" class="decision-sum" aria-live="polite"></div>
+          <div class="decision-actions">
+            <button class="btn" id="approve-rest">Approve the rest</button>
+            <button class="btn primary" id="resume" disabled>Finalize promos</button>
+          </div>
+        </div>
+        <div id="legend" class="legend" aria-label="Card colour = promo type"></div>
+        <div id="cards" class="cards"></div>
+      </div>
+    </section>
+
+    <section class="tabpanel" id="tab-quality" role="tabpanel" hidden>
+      <div id="quality-empty" class="empty">
+        <div class="empty-art" aria-hidden="true"><i></i><i></i><i></i></div>
+        <h3>No results yet</h3>
+        <p>Quality numbers and downloads appear here once a run has written its outputs.</p>
+        <button class="btn primary empty-cta" data-start="sample">Run the sample show</button>
+      </div>
+      <div id="quality-box" hidden>
+        <div id="tiles" class="tiles"></div>
+        <div class="two">
+          <div class="card"><h3>First-pass judge verdicts</h3><div id="fails" class="bars"></div></div>
+          <div class="card"><h3>Downloads</h3><div id="downloads" class="downloads"></div></div>
+        </div>
+        <div class="card"><h3>report.md</h3><div id="report" class="report"></div></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<footer class="foot">
+  <p>The hosted demo runs up to 6 episodes. Run a full show locally with <code>python run.py --show &lt;folder&gt;</code>.</p>
+  <p class="disclaimer">Independent prototype built for the Kuku FM AI Generalist assignment. Not an official Kuku FM product; the Kuku name and logo belong to Kuku FM.</p>
+</footer>
+<script src="app.js"></script>
+</body>
+</html>

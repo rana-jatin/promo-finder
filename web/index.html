@@ -4,218 +4,289 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Promo Finder</title>
-  <meta name="description" content="Finds, judges and ranks 20–60 s promo clips in timestamped microdrama screenplays, with an editor review step.">
+  <meta name="description" content="Promo Finder reads microdrama screenplays and finds the 20–60 second clips most likely to make a viewer start the next episode, then lets an editor approve them.">
   <meta name="theme-color" content="#0b0b0c">
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="landing.css">
   <script>
+    // Old links pointed a run at "/#run=<id>": the studio now lives at /app.html.
+    if (/(^#|&)(run|tab)=/.test(location.hash)) location.replace("app.html" + location.hash);
     try { const t = localStorage.getItem("pf:theme"); if (t) document.documentElement.dataset.theme = JSON.parse(t); } catch {}
   </script>
 </head>
-<body>
+<body class="landing">
 <header class="top">
-  <div class="brand">
-    <img class="logo" src="kuku-logo.png" width="40" height="40" alt="Kuku">
+  <a class="brand" href="./" aria-label="Promo Finder home">
+    <img class="logo" src="kuku-logo.png" width="40" height="40" alt="">
     <div class="brand-text">
-      <h1>Promo Finder</h1>
+      <span class="brand-name">Promo Finder</span>
       <span class="tag">for Kuku FM microdramas</span>
     </div>
-  </div>
-  <div class="top-actions">
-    <a id="repo-link" class="ghost-link" href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
-    <a class="ghost-link" href="/api/docs" target="_blank" rel="noopener">API</a>
+  </a>
+  <nav class="top-actions" aria-label="Main">
+    <a class="ghost-link hide-sm" href="#how">How it works</a>
+    <a class="ghost-link hide-sm" href="#rules">Rules</a>
+    <a class="ghost-link hide-sm" href="#faq">FAQ</a>
+    <a class="ghost-link hide-sm" href="https://github.com/rana-jatin/promo-finder" target="_blank" rel="noopener">GitHub</a>
     <button id="theme" class="icon-btn" type="button" aria-label="Toggle light or dark theme" title="Toggle theme">
       <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 0 1-4.4 2.26 5.4 5.4 0 0 1-3.14-9.8A9.2 9.2 0 0 0 12 3z"/></svg>
     </button>
-  </div>
+    <a class="btn primary small" href="app.html">Open the studio</a>
+  </nav>
 </header>
 
-<div id="wake" class="wake" hidden><span class="spinner" aria-hidden="true"></span>Waking up the server. Free instances sleep after 15 minutes idle; this takes about a minute.</div>
-
-<section class="hero">
-  <div class="hero-copy">
-    <p class="eyebrow">From script to scroll-stopper</p>
-    <h2>Find the 30 seconds that make people binge.</h2>
-    <p class="lede">Drop in episode screenplays. The graph mines every hook and cliffhanger, has a cold judge score each cut, repairs the weak ones, ranks them head-to-head, then pauses for you to approve.</p>
-  </div>
-  <div class="hero-rules">
-    <p class="rules-label">Every promo must pass <span>checked in code, not by the model</span></p>
-    <ul class="hero-chips" aria-label="Rules every promo must pass">
-      <li><b>20–60 s</b><span>clip length</span></li>
-      <li><b>≤ 3 s</b><span>to the hook</span></li>
-      <li><b>Open question</b><span>left at the cut</span></li>
-      <li><b>Round-trip</b><span>timestamps match the script</span></li>
-    </ul>
-  </div>
-</section>
-
-<div class="layout" id="layout">
-  <aside class="side" aria-label="Run settings">
-    <section class="panel-box">
-      <h3 class="label">Engine</h3>
-      <label class="choice"><input type="radio" name="engine" value="cloud" checked>
-        <span class="choice-body"><b>Server models</b><small>The same models as the full run: Gemini for reading, OpenAI for judging, Groq as fallback. The sample show replays instantly.</small></span></label>
-      <label class="choice"><input type="radio" name="engine" value="custom">
-        <span class="choice-body"><b>Your own API key</b><small>Any LiteLLM model. The key is used for this run only and never stored.</small></span></label>
-      <label class="choice"><input type="radio" name="engine" value="offline">
-        <span class="choice-body"><b>Offline baseline</b><small>No API. Keyword heuristics: shows the pipeline, not the judgement.</small></span></label>
-
-      <div id="custom-box" class="sub-box" hidden>
-        <label class="field">Model
-          <select id="model-select"></select>
-        </label>
-        <label class="field" id="custom-model-wrap" hidden>LiteLLM model string
-          <input id="custom-model" placeholder="provider/model-name" autocomplete="off" spellcheck="false">
-        </label>
-        <label class="field">API key
-          <input id="api-key" type="password" placeholder="Stays in this tab" autocomplete="off">
-        </label>
+<main>
+  <!-- ============================================================ hero -->
+  <section class="l-hero">
+    <div class="l-hero-copy">
+      <p class="eyebrow">From screenplay to scroll-stopper</p>
+      <h1>Find the 30 seconds that make people binge.</h1>
+      <p class="l-lede">Promo Finder reads your microdrama episodes, finds the hooks, reveals and cliffhangers, and cuts them into 20–60 second promos. Each one is scored and repaired if needed. You decide which ones go out.</p>
+      <div class="l-cta">
+        <a class="btn primary big" href="app.html#sample">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 5.5l11 6.5-11 6.5z" fill="currentColor"/></svg>
+          Try the sample show</a>
+        <a class="btn big" href="app.html">Upload your own scripts</a>
       </div>
-    </section>
+      <p class="l-note">No sign-up. The sample replays a recorded run, so it finishes in about a second and costs nothing.</p>
+    </div>
 
-    <section class="panel-box">
-      <h3 class="label">Run mode</h3>
-      <div class="seg" role="radiogroup" aria-label="Run mode">
-        <label><input type="radio" name="mode" value="fast" checked><span>Fast</span></label>
-        <label><input type="radio" name="mode" value="full"><span>Full</span></label>
+    <!-- Illustration: a timestamped script page, a highlighted cut, and the promo it becomes on a phone. -->
+    <div class="l-art" aria-hidden="true">
+      <div class="sheet">
+        <div class="sheet-head"><span>EPISODE 1</span><span>SCENE 01 · NIGHT FERRY DECK</span></div>
+        <div class="sheet-line"><time>00:03.20</time><p><b>BIANCA</b>“Careful, deck girl. That rope costs more than you do.”</p></div>
+        <div class="sheet-line"><time>00:06.60</time><p><b>INES</b>“Mind the edge, miss. The deck is slippery tonight.”</p></div>
+        <div class="sheet-cut">
+          <span class="cut-tag">✂ cut · 34 s</span>
+          <div class="sheet-line"><time>01:58.40</time><p><b>DAMIAN</b>“This crest was destroyed twenty years ago.”</p></div>
+          <div class="sheet-line"><time>02:04.10</time><p><b>INES</b>“It’s just my mother’s locket.”</p></div>
+          <div class="sheet-line"><time>02:31.80</time><p><b>DAMIAN</b>“Where did you really get this locket, Ines?”</p></div>
+        </div>
+        <div class="sheet-line dim"><time>02:36.00</time><p><b>INES</b>…</p></div>
       </div>
-      <small class="hint">Fast judges the top 15 candidates; Full judges up to 40.</small>
 
-      <label class="toggle"><input type="checkbox" id="duels"><span class="track" aria-hidden="true"></span>
-        <span>Head-to-head duels <small>+30 calls</small></span></label>
+      <svg class="flow" viewBox="0 0 80 40"><path d="M2 20 C 30 20, 40 8, 74 14" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 5"/><path d="M66 8 L76 14 L67 20" fill="none" stroke="currentColor" stroke-width="2"/></svg>
 
-      <div class="field">Max repair rounds
-        <div class="seg" role="radiogroup" aria-label="Max repair rounds">
-          <label><input type="radio" name="repair" value="0"><span>0</span></label>
-          <label><input type="radio" name="repair" value="1" checked><span>1</span></label>
-          <label><input type="radio" name="repair" value="2"><span>2</span></label>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="ph-top"><span class="ph-badge">PROMO #1</span><span>0:34</span></div>
+          <div class="ph-glow"></div>
+          <div class="ph-caption">“Where did you really get this locket, Ines?”</div>
+          <div class="ph-track"><i class="ph-hook"></i><i class="ph-fill"></i></div>
+          <div class="ph-cta">Watch Episode 2 <span>→</span></div>
         </div>
       </div>
-    </section>
 
-    <details class="panel-box pass">
-      <summary>Demo passcode</summary>
-      <input id="passcode" type="password" placeholder="Unlocks uploads on server models" autocomplete="off">
-    </details>
-    <p class="hint" id="server-note"></p>
-  </aside>
+      <span class="chip c1">⚡ hook at 1.8 s</span>
+      <span class="chip c2">✓ 34 s long</span>
+      <span class="chip c3">? Is Ines the heiress?</span>
+    </div>
+  </section>
 
-  <main>
-    <nav class="tabs" role="tablist" aria-label="Sections">
-      <button role="tab" data-tab="run" aria-selected="true"><span class="num">1</span>Upload &amp; run</button>
-      <button role="tab" data-tab="review" aria-selected="false"><span class="num">2</span>Editor review<span id="review-dot" class="dot" hidden></span></button>
-      <button role="tab" data-tab="quality" aria-selected="false"><span class="num">3</span>Quality &amp; exports</button>
-    </nav>
+  <!-- ============================================================ how it works -->
+  <section class="l-section" id="how">
+    <div class="l-head">
+      <p class="eyebrow">How it works</p>
+      <h2>Five steps from script to shortlist</h2>
+      <p>Each step is a stage in the pipeline. The labels under each card are the stage names you will see in the studio’s progress bar.</p>
+    </div>
+    <ol class="steps">
+      <li class="step">
+        <span class="step-n">1</span>
+        <svg class="step-ic" viewBox="0 0 48 48" aria-hidden="true"><rect x="9" y="6" width="26" height="34" rx="4" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/><path d="M15 15h14M15 21h14M15 27h9" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/><circle cx="34" cy="34" r="7" fill="var(--surface)" stroke="var(--text)" stroke-width="2"/><path d="M39 39l4 4" stroke="var(--text)" stroke-width="2.4" stroke-linecap="round"/></svg>
+        <h3>Read the show</h3>
+        <p>Reads every timestamped line and writes a short show bible: who is who, what is secret, which tropes keep coming back.</p>
+        <span class="stage-tags">Parse · Bible</span>
+      </li>
+      <li class="step">
+        <span class="step-n">2</span>
+        <svg class="step-ic" viewBox="0 0 48 48" aria-hidden="true"><path d="M6 34 L14 22 L20 28 L28 12 L34 24 L42 18" fill="none" stroke="var(--accent)" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/><circle cx="28" cy="12" r="4" fill="var(--accent)"/><circle cx="14" cy="22" r="3" fill="var(--text)"/><path d="M6 40h36" stroke="var(--border)" stroke-width="2"/></svg>
+        <h3>Mine the moments</h3>
+        <p>Marks the hooks, reveals and cliffhangers in each episode, then links each set-up to its pay-off, even across episodes.</p>
+        <span class="stage-tags">Mine · Link arcs</span>
+      </li>
+      <li class="step">
+        <span class="step-n">3</span>
+        <svg class="step-ic" viewBox="0 0 48 48" aria-hidden="true"><rect x="5" y="17" width="12" height="14" rx="3" fill="var(--accent)"/><rect x="19" y="17" width="9" height="14" rx="3" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/><rect x="30" y="17" width="13" height="14" rx="3" fill="var(--accent)" opacity=".6"/><path d="M24 6v6M24 36v6" stroke="var(--text)" stroke-width="2" stroke-linecap="round"/></svg>
+        <h3>Cut candidate promos</h3>
+        <p>Stitches 20–60 s cuts in four shapes: one continuous scene, a cold open, an episode bridge, or two scenes from one story arc.</p>
+        <span class="stage-tags">Assemble</span>
+      </li>
+      <li class="step">
+        <span class="step-n">4</span>
+        <svg class="step-ic" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="16" fill="none" stroke="var(--surface-3)" stroke-width="6"/><path d="M24 8 A16 16 0 1 1 9.3 30.3" fill="none" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"/><text x="24" y="29" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)" font-family="Poppins, sans-serif">4.3</text></svg>
+        <h3>Judge, repair, rank</h3>
+        <p>A judge that has not seen the script scores each cut as a viewer would. Weak cuts get a repair attempt, and the strongest ones can be compared head-to-head.</p>
+        <span class="stage-tags">Judge + repair · Select · Duels · Rank</span>
+      </li>
+      <li class="step">
+        <span class="step-n">5</span>
+        <svg class="step-ic" viewBox="0 0 48 48" aria-hidden="true"><rect x="6" y="10" width="36" height="28" rx="6" fill="var(--good-soft)" stroke="var(--good)" stroke-width="2"/><path d="M16 24l6 6 11-12" fill="none" stroke="var(--good)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <h3>You make the call</h3>
+        <p>Approve, reject or nudge each promo. A rejected promo is replaced from the reserve and the list is re-ranked before anything is final.</p>
+        <span class="stage-tags">Editor · Write</span>
+      </li>
+    </ol>
+  </section>
 
-    <section class="tabpanel" id="tab-run" role="tabpanel">
-      <div class="sources">
-        <article class="source sample">
-          <div class="poster" aria-hidden="true">
-            <span class="poster-ep">EP 1–3</span>
-            <span class="poster-title" id="sample-title">Sample show</span>
+  <!-- ============================================================ rules -->
+  <section class="l-section" id="rules">
+    <div class="l-head">
+      <p class="eyebrow">Built-in rules</p>
+      <h2>Every promo must pass four rules</h2>
+      <p>These rules are checked in code, not by the model. A cut that breaks one is fixed or dropped before you ever see it.</p>
+    </div>
+    <div class="rules">
+      <div class="rule">
+        <div class="rule-viz len" aria-hidden="true"><span class="zone"></span><span class="mark" style="left:38%"></span><em>20 s</em><em>60 s</em></div>
+        <b>20–60 seconds</b>
+        <p>Long enough to tell a story, short enough to finish before the thumb moves on.</p>
+      </div>
+      <div class="rule">
+        <div class="rule-viz hook" aria-hidden="true"><span class="fill"></span><span class="bolt">⚡</span><em>0 s</em><em>3 s</em></div>
+        <b>Hook within 3 seconds</b>
+        <p>The first line has to grab attention, so promos don’t open on scenery or set-up.</p>
+      </div>
+      <div class="rule">
+        <div class="rule-viz q" aria-hidden="true">?</div>
+        <b>Ends on an open question</b>
+        <p>The cut stops before the answer, so the viewer has a reason to start the episode.</p>
+      </div>
+      <div class="rule">
+        <div class="rule-viz ts" aria-hidden="true"><code>01:58.40</code><span>⇄</span><code>01:58.40</code></div>
+        <b>Timestamps round-trip</b>
+        <p>Every cut maps back to exact script timestamps, so an editor can find it in the footage.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ what you get -->
+  <section class="l-section" id="get">
+    <div class="get">
+      <div class="get-copy">
+        <p class="eyebrow">What you get</p>
+        <h2>A ranked shortlist you can actually use</h2>
+        <ul class="ticks">
+          <li><b>Ranked promo cards</b>, each with its timestamps, hook line, cliffhanger and the question it leaves the viewer with.</li>
+          <li><b>Scores you can read</b>: hook, cliffhanger, works on its own, trope strength and pace, each out of 5.</li>
+          <li><b>A reserve list</b> that refills the shortlist when you reject a promo.</li>
+          <li><b>Downloads</b>: the final ranking as JSON, a readable report, your decisions, and every raw stage output.</li>
+        </ul>
+        <a class="btn primary" href="app.html#sample">See it on the sample show</a>
+      </div>
+
+      <figure class="get-card">
+        <article class="promo" style="--tc: var(--t-continuous)">
+          <div class="cover">
+            <div class="cover-top">
+              <div><div class="rank">#1<small>P01</small></div><span class="ribbon">Post first</span></div>
+              <span class="score-pill">4.3<small> / 5</small></span>
+            </div>
+            <div class="cover-meta"><span>Continuous</span><span>34.0 s</span><span>⚡ hook at 1.8 s</span></div>
+            <div class="strip"><span class="s" style="flex:1">E01 · 34s</span><i class="hook" style="left:5%"></i><i class="cliff"></i></div>
           </div>
-          <div class="source-body">
-            <h3>Try the sample show</h3>
-            <p id="sample-desc">Three invented episodes, no real show content.</p>
-            <button class="btn primary" id="run-sample">
-              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M8 5.5l11 6.5-11 6.5z" fill="currentColor"/></svg>
-              Run on 3 sample episodes</button>
+          <div class="promo-body">
+            <div class="segs"><span>E01  01:58.40 → 02:32.40</span></div>
+            <p class="line"><b><span>Hook</span></b>“This crest was destroyed twenty years ago.”</p>
+            <p class="line cliff"><b><span>Cliffhanger</span></b>“Where did you really get this locket, Ines?”</p>
+            <p class="question">Is the ferry girl the heiress everyone thinks is dead?</p>
+            <div class="scores">
+              <div class="score"><div class="ring" style="--p:90"><span>4.5</span></div>Hook</div>
+              <div class="score"><div class="ring" style="--p:92"><span>4.6</span></div>Cliff</div>
+              <div class="score"><div class="ring" style="--p:80"><span>4.0</span></div>Alone</div>
+              <div class="score"><div class="ring" style="--p:86"><span>4.3</span></div>Trope</div>
+              <div class="score"><div class="ring" style="--p:82"><span>4.1</span></div>Pace</div>
+            </div>
+            <div class="actions" aria-hidden="true"><button type="button" tabindex="-1" aria-pressed="true" data-act="approve">Approve</button><button type="button" tabindex="-1">Reject</button><button type="button" tabindex="-1">Nudge</button></div>
           </div>
         </article>
-        <article class="source">
-          <h3>Your screenplays</h3>
-          <label id="drop" class="drop" tabindex="0">
-            <input type="file" id="files" accept=".txt,text/plain" multiple hidden>
-            <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="M12 3l5 5h-3v6h-4V8H7zm-7 14h14v4H5z"/></svg>
-            <span>Drop episode <code>.txt</code> files or <u>browse</u></span>
-            <small id="limits"></small>
-          </label>
-          <ul id="file-list" class="file-list"></ul>
-          <input id="title" class="title-in" placeholder="Show title (optional)">
-          <button class="btn" id="run-upload" disabled>Run on uploaded episodes</button>
-        </article>
-      </div>
+        <figcaption>Example card based on the invented sample show. The scores here are for illustration only.</figcaption>
+      </figure>
+    </div>
+  </section>
 
-      <div id="status" class="status" hidden></div>
+  <!-- ============================================================ ways to run -->
+  <section class="l-section">
+    <div class="l-head">
+      <p class="eyebrow">Three ways to run it</p>
+      <h2>Pick what suits you</h2>
+    </div>
+    <div class="ways">
+      <div class="way">
+        <span class="way-ic" aria-hidden="true">☁</span>
+        <b>Server models</b>
+        <p>The same models as the full command-line run. The sample show is free. Uploading your own scripts needs the demo passcode.</p>
+      </div>
+      <div class="way">
+        <span class="way-ic" aria-hidden="true">🔑</span>
+        <b>Your own API key</b>
+        <p>Use any model LiteLLM supports. Your key is used for that run only and is never stored.</p>
+      </div>
+      <div class="way">
+        <span class="way-ic" aria-hidden="true">⚙</span>
+        <b>Offline baseline</b>
+        <p>No AI calls at all. Simple keyword rules show how the pipeline works, but not how good its judgement is.</p>
+      </div>
+    </div>
+  </section>
 
-      <div id="progress" class="card" hidden>
-        <div class="prog-head">
-          <h3>Pipeline</h3>
-          <span id="elapsed" class="meta"></span>
-        </div>
-        <ol id="stages" class="stepper"></ol>
-        <details class="log-wrap">
-          <summary>Model routing</summary>
-          <div id="models" class="models"></div>
-        </details>
-        <details class="log-wrap">
-          <summary>Event log</summary>
-          <ol id="log" class="log"></ol>
-        </details>
-        <details class="log-wrap" id="raw-wrap">
-          <summary>Raw outputs</summary>
-          <div class="raw-bar">
-            <select id="raw-file" aria-label="Output file"></select>
-            <span id="raw-meta" class="meta"></span>
-            <a id="raw-dl" class="ghost-link" download hidden>Download</a>
-          </div>
-          <pre id="raw" class="raw" tabindex="0">No output files yet. They appear as each stage writes them.</pre>
-        </details>
-      </div>
-    </section>
+  <!-- ============================================================ FAQ -->
+  <section class="l-section" id="faq">
+    <div class="l-head">
+      <p class="eyebrow">Questions</p>
+      <h2>Good to know</h2>
+    </div>
+    <div class="faq">
+      <details>
+        <summary>What files can I upload?</summary>
+        <p>Plain <code>.txt</code> screenplays with timestamps on each line, one file per episode. The hosted demo takes up to 6 episodes. For a whole show, run it locally with <code>python run.py --show &lt;folder&gt;</code>.</p>
+      </details>
+      <details>
+        <summary>How long does a run take?</summary>
+        <p>The sample show replays in about a second. A live run on 3 episodes usually takes 3 to 15 minutes, depending on settings and how busy the model providers are. You can switch tabs while it runs.</p>
+      </details>
+      <details>
+        <summary>Why does the page say it is waking up?</summary>
+        <p>The demo runs on a free server that sleeps after 15 minutes without visitors. The first visit after that takes about a minute to start it again.</p>
+      </details>
+      <details>
+        <summary>Can I change a promo the tool picked?</summary>
+        <p>Yes. In the review step you can nudge where any segment starts or ends. The new cut snaps to the nearest valid line and is checked against the four rules again.</p>
+      </details>
+      <details>
+        <summary>Is this an official Kuku FM product?</summary>
+        <p>No. It is an independent prototype built for the Kuku FM AI Generalist assignment. The sample show is invented and contains no real show content.</p>
+      </details>
+    </div>
+  </section>
 
-    <section class="tabpanel" id="tab-review" role="tabpanel" hidden>
-      <div id="review-empty" class="empty">
-        <div class="empty-art" aria-hidden="true"><i></i><i></i><i></i></div>
-        <h3>No promos to review yet</h3>
-        <p>Run the pipeline. When it reaches the editor step, the shortlist appears here as cards.</p>
-      </div>
-      <div id="review-box" hidden>
-        <div class="review-head">
-          <div>
-            <h3 id="review-title">Editor review</h3>
-            <p class="meta">Decide every promo: approve it, reject it with a reason, or nudge a cut. Rejected promos are replaced from the reserve and the list is re-ranked. Nudges snap to the nearest legal cut and are checked again; an invalid nudge is dropped.</p>
-            <p id="reserve-note" class="reserve-note" hidden></p>
-          </div>
-        </div>
-        <div class="decision-bar">
-          <div id="decision-sum" class="decision-sum" aria-live="polite"></div>
-          <div class="decision-actions">
-            <button class="btn" id="approve-rest">Approve the rest</button>
-            <button class="btn primary" id="resume" disabled>Finalize promos</button>
-          </div>
-        </div>
-        <div id="legend" class="legend" aria-label="Card colour = promo type"></div>
-        <div id="cards" class="cards"></div>
-      </div>
-    </section>
+  <!-- ============================================================ closing CTA -->
+  <section class="l-final">
+    <h2>Ready to find your first promo?</h2>
+    <p>Run the sample show in one click, or bring your own episodes.</p>
+    <div class="l-cta center">
+      <a class="btn primary big" href="app.html#sample">Try the sample show</a>
+      <a class="btn big" href="app.html">Open the studio</a>
+    </div>
+  </section>
+</main>
 
-    <section class="tabpanel" id="tab-quality" role="tabpanel" hidden>
-      <div id="quality-empty" class="empty">
-        <div class="empty-art" aria-hidden="true"><i></i><i></i><i></i></div>
-        <h3>Nothing measured yet</h3>
-        <p>Quality numbers and downloads appear once a run has written its outputs.</p>
-      </div>
-      <div id="quality-box" hidden>
-        <div id="tiles" class="tiles"></div>
-        <div class="two">
-          <div class="card"><h3>First-pass judge verdicts</h3><div id="fails" class="bars"></div></div>
-          <div class="card"><h3>Downloads</h3><div id="downloads" class="downloads"></div></div>
-        </div>
-        <div class="card"><h3>report.md</h3><div id="report" class="report"></div></div>
-      </div>
-    </section>
-  </main>
-</div>
-
-<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <footer class="foot">
-  <p>The hosted demo runs up to 6 episodes. Run a full show locally with <code>python run.py --show &lt;folder&gt;</code>.</p>
   <p class="disclaimer">Independent prototype built for the Kuku FM AI Generalist assignment. Not an official Kuku FM product; the Kuku name and logo belong to Kuku FM.</p>
 </footer>
-<script src="app.js"></script>
+<script>
+  document.getElementById("theme").addEventListener("click", () => {
+    const root = document.documentElement;
+    const cur = root.dataset.theme || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    const next = cur === "dark" ? "light" : "dark";
+    root.dataset.theme = next;
+    try { localStorage.setItem("pf:theme", JSON.stringify(next)); } catch {}
+  });
+</script>
 </body>
 </html>

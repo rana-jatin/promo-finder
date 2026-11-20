@@ -336,3 +336,41 @@ input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); ou
 .replay b { color: var(--text); font-weight: 600; }
 .tile .sub { font-size: 11.5px; color: var(--faint); position: relative; z-index: 1; }
 @media (max-width: 900px) { .decision-bar { top: 60px; } }
+
+/* ---------- landing split (round 3): slim studio header, plain-language helpers */
+a.brand { text-decoration: none; color: inherit; }
+.hero.slim { padding-top: 26px; align-items: center; grid-template-columns: minmax(0, 1fr) auto; }
+.hero.slim h2 { font-size: clamp(24px, 2.6vw, 32px); }
+.hero.slim .lede { margin-top: 6px; }
+.journey { list-style: none; margin: 0; padding: 0; display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--muted); }
+.journey li { display: flex; align-items: center; gap: 8px; }
+.journey li + li::before { content: ""; width: 22px; height: 2px; background: var(--border); border-radius: 2px; }
+.journey span { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; background: var(--grad); color: #fff; }
+.rec { font-style: normal; font-size: 10.5px; font-weight: 600; color: var(--good); background: var(--good-soft); padding: 1px 7px; border-radius: 999px; margin-left: 4px; vertical-align: 1px; }
+.adv { margin-top: 14px; border-top: 1px dashed var(--border); padding-top: 10px; }
+.adv summary { cursor: pointer; font-size: 13.5px; color: var(--muted); }
+.adv .toggle { margin-top: 12px; }
+.adv > .hint { margin-top: 4px; }
+.pass .hint { margin-top: 8px; }
+.now { margin: 10px 0 0; font-size: 14px; color: var(--text); }
+.now:empty { display: none; }
+.now b { color: var(--accent); font-weight: 600; }
+.stepper li[title] { cursor: help; }
+.score[title] { cursor: help; }
+.how-review { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+.how-review b { font-weight: 600; display: inline-block; min-width: 64px; }
+.how-review .g { color: var(--good); }
+.how-review .r { color: var(--bad); }
+.how-review .w { color: var(--warn); }
+.empty-cta { margin-top: 18px; }
+@media (max-width: 900px) { .hero.slim { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 480px) { .journey { display: none; } }
+
+/* sample poster artwork: the image carries the episode tag and title itself */
+.poster.has-img { align-self: center; height: auto; position: relative; width: 132px; aspect-ratio: 522 / 974; padding: 0; overflow: hidden; background: #0b0b0c; }
+.poster.has-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.poster.has-img .poster-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 480px) {
+  .source.sample:has(.poster.has-img) { flex-direction: row; gap: 14px; }
+  .poster.has-img { width: 104px; aspect-ratio: 522 / 974; }
+}

@@ -1,5 +1,5 @@
 # Render Blueprint: one free web service runs the API and serves the page (web/).
-# Render dashboard -> New -> Blueprint -> pick this repo. It asks for the three secret values below.
+# Render dashboard -> New -> Blueprint -> pick this repo. It asks for the secret values below.
 services:
   - type: web
     name: promo-finder
@@ -20,6 +20,10 @@ services:
       - key: RUNS_PER_HOUR
         value: "8"
       - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY_1      # optional second Gemini key, used after the first hits its daily cap
+        sync: false
+      - key: OPEN_API_KEY          # OpenAI: the judge and duels, same as the CLI
         sync: false
       - key: GROQ_API_KEY
         sync: false

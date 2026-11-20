@@ -4,7 +4,7 @@
 
 Access policy (the URL is public):
   * offline engine (heuristic baseline, no API): always allowed.
-  * server keys (GEMINI_API_KEY + GROQ_API_KEY in the environment): the sample show only, which replays from a
+  * server keys (SERVER_KEYS below, the same models as the CLI): the sample show only, which replays from a
     pre-recorded cache; uploads on the server's keys need DEMO_PASSCODE (unset = locked).
   * a visitor's own key + any LiteLLM model string: allowed. The key lives in memory for that run only.
 """
@@ -50,8 +50,14 @@ _hits: dict[str, deque] = defaultdict(deque)
 _hits_lock = threading.Lock()
 
 
+# Keys the first model of each route in config.yaml needs (Gemini: context + mine, OpenAI: judge) plus the Groq
+# fallback. A missing key is an auth error, not a fallback, so the server engine stays off until all are set.
+# GEMINI_API_KEY_1 (second Gemini key) is optional: it is only tried after GEMINI_API_KEY hits its daily cap.
+SERVER_KEYS = ("GEMINI_API_KEY", "OPEN_API_KEY", "GROQ_API_KEY")
+
+
 def server_keys() -> bool:
-    return bool(os.environ.get("GEMINI_API_KEY") and os.environ.get("GROQ_API_KEY"))
+    return all(os.environ.get(k) for k in SERVER_KEYS)
 
 
 def passcode_ok(code: str | None) -> bool:

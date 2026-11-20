@@ -1,4 +1,5 @@
-"""Re-record the sample show for the hosted demo, with the cloud config (config.cloud.yaml):
+"""Re-record the sample show for the hosted demo, with config.yaml + the config.cloud.yaml overlay (same models
+as the CLI; re-record after any change to llm.routes or the prompts, since cached answers are keyed by model + prompt):
 
   * sample_data/llm_cache/      model answers, so "Run on 3 sample episodes" replays with no API calls
   * sample_data/recorded_run.json  calls / tokens / cost / seconds of each recording run, shown next to a replay
@@ -9,7 +10,7 @@ Two passes:
   2. cache: one shared cache, seeded with pass 1's default-settings answers; the other combinations then add
      only what they need. Every combination replays exactly, and the default replays its own recorded run.
 Each run also rejects the #1 promo once, so the backfill + re-rank after a reject replays too.
-Uses the GEMINI_API_KEY / GROQ_API_KEY in .env; costs a few cents.
+Uses the keys in .env that llm.routes names (Gemini, OpenAI, Groq).
 
     python tools/record_sample.py                       both passes
     python tools/record_sample.py --cache-only DIR      pass 2 only, seeded from DIR (a pass-1 default cache)

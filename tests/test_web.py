@@ -21,11 +21,12 @@ def _files():
     return {p.name: p.read_bytes() for p in SAMPLE.glob("episode-*.txt")}
 
 
-def test_overlay_merges_routes_and_keeps_the_rest():
+def test_overlay_keeps_the_cli_models_and_only_resizes_the_run():
     from src.config import load_config
     base = load_config()
     cloud = load_config(overlay=ROOT / "config.cloud.yaml")
-    assert cloud["llm"]["routes"]["judge"]["models"][0]["name"] == "gemini/gemini-flash-lite-latest"
+    assert cloud["llm"] == base["llm"]  # the hosted demo runs the same model routes as the CLI
+    assert cloud["prompt_version"] == base["prompt_version"]
     assert cloud["run"]["fast_episodes"] == 5 and cloud["run"]["judge_batch"] == base["run"]["judge_batch"]
     assert cloud["promo"] == base["promo"] and cloud["score"] == base["score"]
 
@@ -102,6 +103,10 @@ def test_api_policy(monkeypatch, tmp_path):
     assert r.status_code == 403
     monkeypatch.setenv("GEMINI_API_KEY", "x")
     monkeypatch.setenv("GROQ_API_KEY", "y")
+    monkeypatch.delenv("OPEN_API_KEY", raising=False)
+    r = c.post("/api/runs", data={"settings": json.dumps({"engine": "cloud", "source": "sample"})})
+    assert r.status_code == 400  # the judge route needs OpenAI: without its key the server engine stays off
+    monkeypatch.setenv("OPEN_API_KEY", "z")
     r = c.post("/api/runs", data={"settings": json.dumps({"engine": "cloud", "source": "upload"})}, files=one)
     assert r.status_code == 403  # server keys on uploads need the passcode, and none is set
     r = c.post("/api/runs", data={"settings": json.dumps({"engine": "offline", "source": "upload"})}, files=one)

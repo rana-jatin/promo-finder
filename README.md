@@ -387,8 +387,8 @@ pie showData
   decided, so that's the last place to cut corners.
 - **Every week:** cost grows linearly with episodes. Episodes are mined in parallel (10 at a time),
   so wall-clock time is limited by the provider's rate limits, not the code.
-- **Free tiers work:** [`config.cloud.yaml`](config.cloud.yaml) runs the same pipeline on Gemini
-  Flash-Lite with a Groq fallback. The hosted sample (3 episodes) costs about $0.02.
+- **Free tiers work:** `--model gemini/gemini-flash-lite-latest` runs every stage on Gemini's free
+  Flash-Lite. An earlier version of the hosted demo ran that way, at about $0.02 for 3 episodes.
 - **Robust at volume:** each stage group has a fallback chain of models. A daily cap or a
   content-filter refusal moves to the next model. A crash or quota stop resumes with `--resume`, and
   finished calls replay from a disk cache for free. Every output records the model and prompt
@@ -505,9 +505,14 @@ uvicorn server:app --port 8000      # http://localhost:8000
 - The sample show in [`sample_data/demo_show/`](sample_data/demo_show/) is three invented
   episodes, not Kuku's content. Its recorded model answers let it replay in about a second with no
   API calls.
-- Engines: the server's models (Gemini Flash-Lite, Groq fallback), your own key for one run (kept
-  out of the environment and the logs), or the offline baseline.
-- Uploads on the server's keys need a passcode, and API runs are rate-limited per IP.
+- Engines: the server's models, your own key for one run (kept out of the environment and the
+  logs), or the offline baseline.
+- **The server's models are the same as the CLI's:** the same `llm.routes`, prompts, rules and
+  scoring. [`config.cloud.yaml`](config.cloud.yaml) only shrinks the run for small uploads (5
+  episodes in `--fast`, a top 5 instead of a top 10).
+- The server needs `GEMINI_API_KEY`, `OPEN_API_KEY` and `GROQ_API_KEY` (plus an optional second
+  Gemini key, `GEMINI_API_KEY_1`). Uploads on the server's keys need a passcode, and API runs are
+  rate-limited per IP.
 - [`render.yaml`](render.yaml) deploys it as one free Render web service. Full shows go through the
   CLI, since the demo is capped at 6 episodes.
 
@@ -569,7 +574,7 @@ audit_pack.py       format check across every episode file
 evaluate.py         gold-set metrics, ablation tables, judge stability and leak tests
 export_outputs.py   builds raw_outputs/ and checks it for keys and quoted script
 server.py, web/     hosted demo (FastAPI + static page)
-config.yaml         every model, weight, threshold and rule (config.cloud.yaml: free-tier overlay)
+config.yaml         every model, weight, threshold and rule (config.cloud.yaml: demo-size overlay)
 prompts/            versioned prompts (v1, v3)
 src/
   graph.py          LangGraph wiring: fan-outs, refine loop, coverage check, editor pause

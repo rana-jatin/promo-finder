@@ -9,7 +9,6 @@ import statistics
 from .assemble import iou
 from .judge import hard_fail
 from .parse import EPS, Show
-from .judge import render_clip
 
 
 # --------------------------------------------------------------------------- penalties
@@ -34,14 +33,44 @@ def penalties(show: Show, cand: dict, bible: dict, cfg: dict) -> tuple[float, di
     lo, hi = Z["sweet_spot"]
     if not lo <= cand["duration"] <= hi:
         detail["outside_sweet_spot"] = Z["outside_sweet_spot"]
-    text = render_clip(show, cand)[0].lower()
+    scenes = scene_texts(show, cand)
     for sp in bible.get("spoilers") or []:
-        if max(cand["episodes"]) >= int(sp.get("episode", 10 ** 6)) and any(
-                k and re.search(r"(?<![a-z])" + re.escape(k.lower()), text) for k in sp.get("keywords") or []):
+        at = int(sp.get("episode", 10 ** 6))
+        hit = next((k for k in sp.get("keywords") or [] for ep, text in scenes
+                    if ep >= at and phrase_in(k, text)), None)
+        if hit:
             detail["spoiler"] = Z["spoiler"]
             flags.append(f"spoiler:Ep{sp['episode']}")
             break
     return round(sum(detail.values()), 3), detail, flags
+
+
+# words that carry no twist on their own: "faked his death" matches on {faked, death}
+_STOP = {"a", "an", "the", "his", "her", "their", "its", "he", "she", "they", "him", "them", "of", "to", "in", "on",
+         "at", "for", "and", "or", "as", "by", "with", "from", "is", "was", "be", "been", "has", "had", "have",
+         "that", "this", "who", "whom", "it", "into", "s"}
+
+
+def content_words(phrase: str) -> list[str]:
+    return [w for w in re.findall(r"[a-z0-9]+", phrase.lower()) if w not in _STOP]
+
+
+def phrase_in(phrase: str, text: str) -> bool:
+    """A scene matches a spoiler phrase when ALL its content words appear. Each word matches at a word start,
+    so 'father' also matches 'fathers' (but 'faked' does not match 'fake')."""
+    words = content_words(phrase)
+    return bool(words) and all(re.search(r"(?<![a-z0-9])" + re.escape(w), text) for w in words)
+
+
+def scene_texts(show: Show, cand: dict) -> list[tuple[int, str]]:
+    """(episode, lower-cased text) for each scene the clip shows: spoken lines with speakers, actions, sound and
+    shot descriptions, limited to the clip's own time ranges."""
+    out: dict[tuple[int, int], list[str]] = {}
+    for s in cand["segments"]:
+        for b in show.ep(s["ep"]).blocks_overlapping(s["start"], s["end"]):
+            bits = [b.speaker, b.text] if b.kind == "line" else [b.text]
+            out.setdefault((s["ep"], b.scene), []).extend(x for x in bits if x)
+    return [(ep, " \n ".join(t).lower()) for (ep, _), t in out.items()]
 
 
 def _tod(t: str) -> str:
@@ -68,29 +97,54 @@ def score_all(show: Show, judged: list[dict], bible: dict, cfg: dict) -> list[di
     return out
 
 
-def select(scored: list[dict], rejected_ids: list[str], cfg: dict) -> tuple[list[dict], list[dict]]:
+def select(scored: list[dict], rejected_ids: list[str], cfg: dict,
+           why: dict[str, int] | None = None) -> tuple[list[dict], list[dict]]:
+    """Shortlist + reserve. `why`, if given, counts the eligible candidates held back and the reason."""
     S = cfg["select"]
     picked: list[dict] = []
     per_ep: dict[int, int] = {}
     per_trope: dict[str, int] = {}
     rejected = set(rejected_ids)
-    for c in scored:
-        if not c["eligible"] or c["cand_id"] in rejected:
+    held = why if why is not None else {}
+
+    def hold(reason: str) -> None:
+        held[reason] = held.get(reason, 0) + 1
+
+    for k, c in enumerate(scored):
+        if not c["eligible"]:
+            continue
+        if c["cand_id"] in rejected:
+            hold("rejected by the editor")
             continue
         if any(iou(c, p) > S["iou_dedupe"] for p in picked):
+            hold("overlaps a higher-ranked promo")
             continue
         ep = c["hook"]["ep"]
         trope = c.get("trope") or "other"
         if per_ep.get(ep, 0) >= S["max_per_episode"]:
+            hold(f"over the {S['max_per_episode']}-per-episode cap")
             continue
         if trope != "other" and per_trope.get(trope, 0) >= S["max_per_trope"]:
+            hold(f"over the {S['max_per_trope']}-per-trope cap")
             continue
         picked.append(c)
         per_ep[ep] = per_ep.get(ep, 0) + 1
         per_trope[trope] = per_trope.get(trope, 0) + 1
         if len(picked) >= S["shortlist"] + S["reserve"]:
+            rest = sum(1 for x in scored[k + 1:] if x["eligible"])
+            if rest:
+                held["beyond shortlist + reserve"] = held.get("beyond shortlist + reserve", 0) + rest
             break
     return picked[: S["shortlist"]], picked[S["shortlist"]:]
+
+
+def clip_text(text: str, n: int = 90) -> str:
+    """Shorten at a word boundary with an ellipsis; never cut mid-word."""
+    text = " ".join(str(text).split())
+    if len(text) <= n:
+        return text
+    cut = text[:n].rsplit(" ", 1)[0].rstrip(",;:.-")
+    return (cut or text[:n]) + "…"
 
 
 # --------------------------------------------------------------------------- Bradley-Terry + order
@@ -167,7 +221,7 @@ def rationale(c: dict, ranked: list[dict], cfg: dict) -> str:
         bits.append(f"strongest hook in the shortlist (H {v['hook_score']:.1f}) at {c['hook']['at_s']:.1f}s")
     else:
         bits.append(f"hook H {v['hook_score']:.1f} at {c['hook']['at_s']:.1f}s")
-    bits.append(f"cliff C {v['cliffhanger_score']:.1f}: \"{v['open_question'][:70]}\"")
+    bits.append(f"cliff C {v['cliffhanger_score']:.1f}: \"{clip_text(v['open_question'], 110)}\"")
     if c.get("duel_record"):
         bits.append(f"duels {c['duel_record']}")
     eps = c["episodes"]

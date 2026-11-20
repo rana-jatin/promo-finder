@@ -1,0 +1,55 @@
+{
+  "recorded_at": "2026-11-20 14:06",
+  "models": [
+    "context (bible, link): gemini/gemini-flash-lite-latest -> groq/openai/gpt-oss-120b",
+    "mine (mine): gemini/gemini-flash-lite-latest -> groq/openai/gpt-oss-120b",
+    "judge (judge, duel): gemini/gemini-flash-lite-latest -> groq/openai/gpt-oss-120b"
+  ],
+  "runs": {
+    "fast=True|duels=False|repair=1": {
+      "calls": 14,
+      "prompt_tokens": 36600,
+      "completion_tokens": 4638,
+      "cost_usd": 0.0226,
+      "seconds": 65.5,
+      "shortlist": 5,
+      "reserve": 2
+    },
+    "fast=True|duels=True|repair=1": {
+      "calls": 26,
+      "prompt_tokens": 59837,
+      "completion_tokens": 5587,
+      "cost_usd": 0.0319,
+      "seconds": 111.9,
+      "shortlist": 5,
+      "reserve": 0
+    },
+    "fast=True|duels=False|repair=2": {
+      "calls": 15,
+      "prompt_tokens": 38916,
+      "completion_tokens": 5150,
+      "cost_usd": 0.0245,
+      "seconds": 66.2,
+      "shortlist": 5,
+      "reserve": 2
+    },
+    "fast=True|duels=False|repair=0": {
+      "calls": 11,
+      "prompt_tokens": 31328,
+      "completion_tokens": 4215,
+      "cost_usd": 0.0199,
+      "seconds": 41.9,
+      "shortlist": 5,
+      "reserve": 0
+    },
+    "fast=False|duels=True|repair=2": {
+      "calls": 24,
+      "prompt_tokens": 51655,
+      "completion_tokens": 5220,
+      "cost_usd": 0.0286,
+      "seconds": 109.8,
+      "shortlist": 5,
+      "reserve": 0
+    }
+  }
+}

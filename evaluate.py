@@ -26,7 +26,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from src.assemble import iou, refresh
-from src.bible import bible_brief, visual_aliases
+from src.bible import bible_brief, clip_cast
 from src.config import load_config
 from src.features import load_features
 from src.io_utils import read_jsonl
@@ -131,14 +131,15 @@ def judge_checks(run: Path, args, cfg: dict) -> dict:
     show = load_show(run / "parsed.json")
     feats = load_features(str(run / "parsed.json"))
     bible = json.loads((run / "bible.json").read_text(encoding="utf-8"))
-    aliases = visual_aliases(bible)
+    cast = clip_cast(bible)
+    hook_s = cfg["promo"]["hook_max_s"]
     promos = json.loads((run / "ranked.json").read_text(encoding="utf-8"))["promos"]
     cands = [_rebuild(show, feats, p) for p in promos]
     if args.rejudge_model and cands:
         c2 = load_config(args.config, {"llm.model": args.rejudge_model})
         alt = LLM(c2, call_log=run / "llm_calls_eval.jsonl")
         mine_scores = [p["scores"]["judge_total"] for p in promos]
-        alt_scores = [cold_judge(alt, show, c, c2, aliases)["score"] for c in cands]
+        alt_scores = [cold_judge(alt, show, c, c2, cast)["score"] for c in cands]
         out["cross_model"] = {"model": args.rejudge_model, "tau": kendall_tau(mine_scores, alt_scores),
                               "primary": mine_scores, "alternate": alt_scores}
     if args.stability and cands:
@@ -148,7 +149,7 @@ def judge_checks(run: Path, args, cfg: dict) -> dict:
         for c in sample:
             scores = []
             for r in range(args.stability):
-                text = render_clip(show, c, aliases)[0]
+                text = render_clip(show, c, cast, hook_s=hook_s)[0]
                 system, user_t = load_prompt(cfg["prompts"]["judge"])
                 v = llm.complete_json(stage="judge_stability", system=system, user=fill(user_t, clip=text),
                                       schema=JudgeVerdict, temperature=0.8, cache_salt=f"stability-{r}")
@@ -161,7 +162,7 @@ def judge_checks(run: Path, args, cfg: dict) -> dict:
         llm = LLM(cfg, call_log=run / "llm_calls_eval.jsonl")
         deltas = []
         for c in cands[: args.leak_test]:
-            text = render_clip(show, c, aliases)[0]
+            text = render_clip(show, c, cast, hook_s=hook_s)[0]
             system, user_t = load_prompt(cfg["prompts"]["judge"])
             cold = llm.complete_json(stage="judge", system=system, user=fill(user_t, clip=text), schema=JudgeVerdict)
             warm = llm.complete_json(stage="judge_leak", system=system,

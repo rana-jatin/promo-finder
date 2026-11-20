@@ -24,9 +24,12 @@ def swiss_pairs(ids: list[str], wins: dict[str, int], seed_order: list[str], pla
     return pairs
 
 
-def _duel_once(llm: LLM, show: Show, a: dict, b: dict, cfg: dict, aliases) -> DuelVerdict:
+def _duel_once(llm: LLM, show: Show, a: dict, b: dict, cfg: dict, cast) -> DuelVerdict:
     system, user_t = load_prompt(cfg["prompts"]["duel"])
-    ta, tb = render_clip(show, a, aliases)[0], render_clip(show, b, aliases)[0]
+    hook_s = cfg["promo"]["hook_max_s"]
+    # separate speaker maps per clip, prefixed so the model never merges A_SPEAKER_1 with B_SPEAKER_1
+    ta = render_clip(show, a, cast, prefix="A_", hook_s=hook_s)[0]
+    tb = render_clip(show, b, cast, prefix="B_", hook_s=hook_s)[0]
     user = fill(user_t, a=ta, b=tb)
 
     def offline() -> DuelVerdict:
@@ -36,10 +39,11 @@ def _duel_once(llm: LLM, show: Show, a: dict, b: dict, cfg: dict, aliases) -> Du
     return llm.complete_json(stage="duel", system=system, user=user, schema=DuelVerdict, offline_fn=offline)
 
 
-def run_duels(llm: LLM, show: Show, shortlist: list[dict], cfg: dict, aliases, workers: int = 4) -> list[dict]:
+def run_duels(llm: LLM, show: Show, shortlist: list[dict], cfg: dict, cast, workers: int = 4) -> list[dict]:
     if len(shortlist) < 2:
         return []
     by = {c["cand_id"]: c for c in shortlist}
+    pv = cfg["prompts"]["duel"]
     seed = [c["cand_id"] for c in shortlist]
     wins = {i: 0 for i in seed}
     played: set[frozenset] = set()
@@ -51,12 +55,12 @@ def run_duels(llm: LLM, show: Show, shortlist: list[dict], cfg: dict, aliases, w
         def play(job):
             first, second, order = job
             try:
-                v = _duel_once(llm, show, by[first], by[second], cfg, aliases)
+                v = _duel_once(llm, show, by[first], by[second], cfg, cast)
             except LLMOutputError as e:
-                return {"round": rnd + 1, "a": first, "b": second, "error": str(e)[:200]}
+                return {"round": rnd + 1, "a": first, "b": second, "error": str(e)[:200], "prompt_version": pv}
             w, l = (first, second) if v.winner == "A" else (second, first)
             return {"round": rnd + 1, "a": first, "b": second, "shown_first": first, "winner_id": w,
-                    "loser_id": l, "margin": v.margin, "reason": v.reason}
+                    "loser_id": l, "margin": v.margin, "reason": v.reason, "prompt_version": pv}
 
         with ThreadPoolExecutor(max_workers=workers) as ex:
             results = list(ex.map(play, jobs))

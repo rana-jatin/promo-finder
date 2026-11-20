@@ -21,18 +21,18 @@ from langgraph.runtime import Runtime, get_runtime
 from langgraph.types import Command, Send, interrupt
 
 from .assemble import assemble_pool
-from .bible import run_bible, visual_aliases
+from .bible import clip_cast, run_bible
 from .duel import run_duels
 from .editor import apply_nudges, log_decisions, normalize, review_payload, with_nudges
 from .features import load_features
 from .io_utils import read_json, write_json, write_jsonl
-from .judge import REPAIRABLE, cold_judge, hard_fail, passes
+from .judge import cold_judge, hard_fail, passes
 from .link import link_arcs
 from .llm import LLMOutputError
 from .mine import mine_episode
 from .parse import fmt_ts, load_show, parse_show, save_show
 from .rank import order, score_all, select
-from .repair import repair
+from .repair import REPAIRABLE, repair
 from .schemas import MineResult
 from .write import write_candidates, write_outputs
 
@@ -73,20 +73,21 @@ class ShowState(TypedDict, total=False):
     review_round: int
     review_done: bool
     started: float
+    held_back: dict  # eligible candidates kept out of shortlist + reserve, by reason (latest select)
 
 
 class RefineInput(TypedDict):
     cand: dict
     show_id: str
     parsed_path: str
-    aliases: list
+    cast: list
 
 
 class RefineState(TypedDict, total=False):
     cand: dict
     show_id: str
     parsed_path: str
-    aliases: list
+    cast: list  # bible.clip_cast: who may be named in the cold render
     verdict: Optional[dict]
     best: Optional[dict]  # {"cand", "verdict", "round"}
     round: int
@@ -186,9 +187,9 @@ def assemble_node(state: ShowState, runtime: Runtime[RunContext]) -> dict:
 
 
 def _sends(state: ShowState, cands: list[dict]) -> list[Send]:
-    aliases = [list(p) for p in visual_aliases(state.get("bible") or {})]
+    cast = clip_cast(state.get("bible") or {})
     return [Send("refine", {"cand": c, "show_id": state["show_id"], "parsed_path": state["parsed_path"],
-                            "aliases": aliases}) for c in cands]
+                            "cast": cast}) for c in cands]
 
 
 def fanout_judging(state: ShowState):
@@ -217,8 +218,9 @@ def select_node(state: ShowState, runtime: Runtime[RunContext]) -> dict:
     scored = score_all(load_show(state["parsed_path"]), state.get("judged") or [], state.get("bible") or {},
                        ctx["config"])
     write_candidates(ctx["out_dir"], scored)
-    shortlist, reserve = select(scored, state.get("rejected_ids") or [], ctx["config"])
-    return {"shortlist": shortlist, "reserve": reserve}
+    why: dict[str, int] = {}
+    shortlist, reserve = select(scored, state.get("rejected_ids") or [], ctx["config"], why=why)
+    return {"shortlist": shortlist, "reserve": reserve, "held_back": why}
 
 
 def route_duels(state: ShowState) -> Literal["duel", "order"]:
@@ -228,7 +230,7 @@ def route_duels(state: ShowState) -> Literal["duel", "order"]:
 def duel_node(state: ShowState, runtime: Runtime[RunContext]) -> dict:
     ctx = runtime.context
     games = run_duels(ctx["llm"], load_show(state["parsed_path"]), state["shortlist"], ctx["config"],
-                      visual_aliases(state.get("bible") or {}), workers=ctx["config"]["run"]["max_concurrency"])
+                      clip_cast(state.get("bible") or {}), workers=ctx["config"]["run"]["max_concurrency"])
     write_jsonl(_out(ctx) / "duels.jsonl", games)
     return {"duels": games}
 
@@ -249,13 +251,13 @@ def write_node(state: ShowState, runtime: Runtime[RunContext]) -> dict:
         "mode": {"fast": bool(ctx.get("fast")), "duels": bool(ctx.get("run_duels")),
                  "review": bool(ctx.get("enable_review")), "max_repair_rounds": cfg["score"]["max_repair_rounds"],
                  "episodes": state.get("episode_ids")},
-        "prompts": cfg["prompts"], "llm": ctx["llm"].snapshot(),
+        "prompt_version": cfg.get("prompt_version"), "prompts": cfg["prompts"], "llm": ctx["llm"].snapshot(),
         "seconds": round(time.time() - state.get("started", time.time()), 1),
         "finished": time.strftime("%Y-%m-%d %H:%M:%S"),
         "review": {"round": state.get("review_round", 0), "done": state.get("review_done", False),
                    "decisions": len(state.get("decisions") or [])},
     }
-    write_outputs(_out(ctx), show, state, cfg, visual_aliases(state.get("bible") or {}), run_meta)
+    write_outputs(_out(ctx), show, state, cfg, clip_cast(state.get("bible") or {}), run_meta)
     write_json(_out(ctx) / "run_meta.json", run_meta)
     return {}
 
@@ -293,14 +295,15 @@ def judge_node(s: RefineState, runtime: Runtime[RunContext]) -> dict:
     rnd = s.get("round", 0)
     try:
         v = cold_judge(ctx["llm"], load_show(s["parsed_path"]), s["cand"], ctx["config"],
-                       [tuple(a) for a in s.get("aliases") or []])
+                       s.get("cast") or [])
     except LLMOutputError as e:
         return {"verdict": None, "repairable": False, "improved": False, "round": rnd,
                 "history": (s.get("history") or []) + [{"round": rnd, "error": str(e)[:200]}]}
     best = s.get("best")
     improved = best is None or v["score"] > best["verdict"]["score"] + 1e-9
     hist = (s.get("history") or []) + [{
-        "round": rnd, "score": v["score"], "main_failure": v["main_failure"], "repairs": s["cand"].get("repairs", []),
+        "round": rnd, "score": v["score"], "passed": passes(v, ctx["config"]), "main_failure": v["main_failure"],
+        "repairs": s["cand"].get("repairs", []),
         "segments": [(x["ep"], fmt_ts(x["start"]), fmt_ts(x["end"])) for x in s["cand"]["segments"]]}]
     return {"verdict": v, "best": {"cand": s["cand"], "verdict": v, "round": rnd} if improved else best,
             "improved": improved, "repairable": v["main_failure"] in REPAIRABLE, "history": hist, "round": rnd}

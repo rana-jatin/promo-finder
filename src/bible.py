@@ -1,6 +1,7 @@
 """Stage 2: story bible from the 50 episode headers (1 LLM call). Feeds mining and linking with show
-context, the select stage with late-twist spoilers, and the cold judge with appearance-only
-descriptors (so visual rows say "the scarred soldier", never a name a stranger was not told)."""
+context (arc ids, tropes, spoilers), the select stage with late-twist spoilers, and the cold clip
+renderer with each character's names and an appearance-only descriptor (so a stranger only meets a
+name that someone in the clip says aloud)."""
 from __future__ import annotations
 
 import re
@@ -12,6 +13,10 @@ from .schemas import Bible, Character
 
 GENERIC_TITLES = {"lady", "lord", "duke", "duchess", "sir", "father", "mother", "king", "queen", "prince",
                   "princess", "his grace", "her grace", "your grace", "madam", "miss", "master", "the duke"}
+# leading forms of address: "Lady Bianca" is also "Bianca", "Father Thomas" is also "Thomas"
+HONORIFICS = {"the", "lady", "lord", "sir", "duke", "duchess", "dowager", "madam", "madame", "miss", "mr", "mrs",
+              "ms", "master", "prince", "princess", "king", "queen", "father", "sister", "brother", "uncle", "aunt",
+              "dr", "doctor", "young", "old"}
 
 
 def headers_text(show: Show) -> str:
@@ -26,15 +31,36 @@ def offline_bible(show: Show) -> Bible:
 
 
 def run_bible(llm: LLM, show: Show, cfg: dict) -> dict:
+    vocab = cfg["vocab"]["tropes"]
     system, user_t = load_prompt(cfg["prompts"]["bible"])
-    system = fill(system, free_window=cfg["rank"]["free_window"])
+    system = fill(system, free_window=cfg["rank"]["free_window"], trope_vocab=", ".join(vocab))
     user = fill(user_t, title=show.title, n_episodes=len(show.episodes), headers=headers_text(show))
     res = llm.complete_json(stage="bible", system=system, user=user, schema=Bible,
                             offline_fn=lambda: offline_bible(show))
     out = res.model_dump()
+    # tropes are a closed list: anything off-list is dropped here (and kept on record), never passed downstream
+    out["tropes"] = list(dict.fromkeys(t for t in out["tropes"] if t in set(vocab)))
+    off = [t for t in res.tropes if t not in set(vocab)]
+    if off:
+        out["tropes_off_vocab"] = off
+    seen: set[str] = set()
+    for a in out["arcs"]:  # arc ids key the setup/payoff grouping, so they must be unique
+        base, k = a["id"], 2
+        while a["id"] in seen:
+            a["id"], k = f"{base}_{k}", k + 1
+        seen.add(a["id"])
     out["prompt_version"] = cfg["prompts"]["bible"]
     out["model"] = llm.model_for("bible")
     return out
+
+
+def show_tropes(bible: dict, cfg: dict) -> list[str]:
+    """{{tropes}} for mining and linking: the bible's picks (falls back to the whole list if it picked none)."""
+    return list(bible.get("tropes") or []) or list(cfg["vocab"]["tropes"])
+
+
+def arc_ids(bible: dict) -> list[str]:
+    return [a["id"] for a in bible.get("arcs") or [] if a.get("id")]
 
 
 def bible_brief(bible: dict, with_spoilers: bool = False) -> str:
@@ -42,30 +68,52 @@ def bible_brief(bible: dict, with_spoilers: bool = False) -> str:
     lines = [f"Premise: {bible.get('premise', '')}"]
     chars = bible.get("characters") or []
     if chars:
-        lines.append("Characters: " + "; ".join(
-            f"{c['name']}" + (f" (aka {', '.join(c['aliases'])})" if c.get("aliases") else "")
-            + (f": {c['role']}" if c.get("role") else "") for c in chars[:12]))
+        lines.append("Characters:")
+        for c in chars[:12]:
+            bits = [c["name"] + (f" (aka {', '.join(c['aliases'])})" if c.get("aliases") else "")]
+            bits += [x for x in (c.get("role"), c.get("relationship")) if x]
+            lines.append("- " + "; ".join(bits))
     if bible.get("tropes"):
         lines.append("Tropes: " + ", ".join(bible["tropes"]))
-    for a in (bible.get("arcs") or [])[:8]:
-        lines.append(f"Arc '{a['name']}' (eps {', '.join(map(str, a.get('episodes', [])))}): {a.get('summary', '')}")
-    if with_spoilers:
-        for s in bible.get("spoilers") or []:
-            lines.append(f"Late twist (Ep {s['episode']}): {s['reveal']}")
+    arcs = (bible.get("arcs") or [])[:8]
+    if arcs:
+        lines.append("Arcs:")
+        for a in arcs:
+            lines.append(f"- {a.get('id', '')}: {a['name']} (eps {', '.join(map(str, a.get('episodes', [])))}): "
+                         f"{a.get('summary', '')}")
+    if with_spoilers and bible.get("spoilers"):
+        lines.append("Spoilers (never show these reveals):")
+        for s in bible["spoilers"]:
+            lines.append(f"- Ep {s['episode']}: {s['reveal']}")
     return "\n".join(lines)
 
 
-def visual_aliases(bible: dict) -> list[tuple[str, str]]:
-    """(name or alias, appearance-only descriptor) pairs, longest name first, for the cold render."""
-    pairs: list[tuple[str, str]] = []
+def _norm(s: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9' ]+", " ", (s or "").lower()).split())
+
+
+def strip_honorifics(s: str) -> str:
+    words = _norm(s).split()
+    while len(words) > 1 and words[0] in HONORIFICS:
+        words = words[1:]
+    return " ".join(words)
+
+
+def clip_cast(bible: dict) -> list[dict]:
+    """One entry per bible character for the cold clip renderer (JSON-safe, so it rides in graph payloads):
+      labels  every name and alias, normalised: matches a script speaker label to this person
+      names   the forms that count as this person's name being SAID ALOUD (generic titles such as
+              "Your Grace" excluded), longest first; also what gets replaced in VISUAL rows
+      desc    appearance-only descriptor, without a leading article ("" if the bible gave none)"""
+    cast = []
     for c in bible.get("characters") or []:
-        desc = (c.get("visual_descriptor") or "").strip()
-        if not desc:
-            continue
-        desc = re.sub(r"^(the|a|an)\s+", "", desc, flags=re.I)
-        for name in [c.get("name", ""), *(c.get("aliases") or [])]:
-            name = name.strip()
-            if len(name) >= 3 and name.lower() not in GENERIC_TITLES:
-                pairs.append((name, desc))
-    pairs.sort(key=lambda p: -len(p[0]))
-    return pairs
+        raw = [c.get("name", ""), *(c.get("aliases") or [])]
+        labels = list(dict.fromkeys(x for x in (_norm(r) for r in raw) if x))
+        names = set()
+        for r in raw:
+            for form in (_norm(r), strip_honorifics(r)):
+                if len(form) >= 3 and form not in GENERIC_TITLES:
+                    names.add(form)
+        desc = re.sub(r"^(the|a|an)\s+", "", (c.get("visual_descriptor") or "").strip(), flags=re.I)
+        cast.append({"labels": labels, "names": sorted(names, key=lambda x: (-len(x), x)), "desc": desc})
+    return cast

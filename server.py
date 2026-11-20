@@ -43,7 +43,8 @@ PRESETS = [
 
 manager = RunManager(os.environ.get("PROMO_WORK_DIR", "/tmp/promo" if os.name != "nt" else ROOT / ".web"),
                      workers=int(os.environ.get("RUN_WORKERS", "2")),
-                     seed_cache=ROOT / "sample_data" / "llm_cache", overlay=ROOT / "config.cloud.yaml")
+                     seed_cache=ROOT / "sample_data" / "llm_cache", overlay=ROOT / "config.cloud.yaml",
+                     recorded=ROOT / "sample_data" / "recorded_run.json")
 app = FastAPI(title="Promo Finder", docs_url="/api/docs", openapi_url="/api/openapi.json")
 _hits: dict[str, deque] = defaultdict(deque)
 _hits_lock = threading.Lock()

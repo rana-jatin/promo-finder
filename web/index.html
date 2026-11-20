@@ -4,59 +4,89 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Promo Finder</title>
-  <meta name="description" content="Finds, judges and ranks promo clips in timestamped microdrama screenplays (LangGraph pipeline with an editor review step).">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23c2410c'/><path d='M11 9l13 7-13 7z' fill='white'/></svg>">
+  <meta name="description" content="Finds, judges and ranks 20–60 s promo clips in timestamped microdrama screenplays, with an editor review step.">
+  <meta name="theme-color" content="#0b0b0c">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <script>
+    try { const t = localStorage.getItem("pf:theme"); if (t) document.documentElement.dataset.theme = JSON.parse(t); } catch {}
+  </script>
 </head>
 <body>
 <header class="top">
   <div class="brand">
-    <span class="logo" aria-hidden="true">▶</span>
-    <div>
+    <img class="logo" src="kuku-logo.png" width="40" height="40" alt="Kuku">
+    <div class="brand-text">
       <h1>Promo Finder</h1>
-      <p class="sub">Screenplays in, ranked 20–60 s promos out: parse → bible → mine → judge &amp; repair → rank → editor review</p>
+      <span class="tag">for Kuku FM microdramas</span>
     </div>
   </div>
-  <div class="top-links">
-    <a id="repo-link" href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
-    <a href="/api/docs" target="_blank" rel="noopener">API</a>
+  <div class="top-actions">
+    <a id="repo-link" class="ghost-link" href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
+    <a class="ghost-link" href="/api/docs" target="_blank" rel="noopener">API</a>
+    <button id="theme" class="icon-btn" type="button" aria-label="Toggle light or dark theme" title="Toggle theme">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 0 1-4.4 2.26 5.4 5.4 0 0 1-3.14-9.8A9.2 9.2 0 0 0 12 3z"/></svg>
+    </button>
   </div>
 </header>
 
-<div id="wake" class="wake" hidden>Waking up the server… free instances sleep after 15 minutes idle (about a minute).</div>
+<div id="wake" class="wake" hidden><span class="spinner" aria-hidden="true"></span>Waking up the server. Free instances sleep after 15 minutes idle; this takes about a minute.</div>
 
-<div class="layout">
+<section class="hero">
+  <div class="hero-copy">
+    <p class="eyebrow">From script to scroll-stopper</p>
+    <h2>Find the 30 seconds that make people binge.</h2>
+    <p class="lede">Drop in episode screenplays. The graph mines every hook and cliffhanger, has a cold judge score each cut, repairs the weak ones, ranks them head-to-head, then pauses for you to approve.</p>
+  </div>
+  <div class="hero-rules">
+    <p class="rules-label">Every promo must pass <span>checked in code, not by the model</span></p>
+    <ul class="hero-chips" aria-label="Rules every promo must pass">
+      <li><b>20–60 s</b><span>clip length</span></li>
+      <li><b>≤ 3 s</b><span>to the hook</span></li>
+      <li><b>Open question</b><span>left at the cut</span></li>
+      <li><b>Round-trip</b><span>timestamps match the script</span></li>
+    </ul>
+  </div>
+</section>
+
+<div class="layout" id="layout">
   <aside class="side" aria-label="Run settings">
-    <section>
-      <h2>Engine</h2>
-      <label class="radio"><input type="radio" name="engine" value="cloud" checked>
-        <span><b>Server models</b><small>Gemini Flash-Lite + Groq gpt-oss-120b. Sample show replays from cache.</small></span></label>
-      <label class="radio"><input type="radio" name="engine" value="custom">
-        <span><b>Your own API key</b><small>Any LiteLLM model, one model for every stage. The key is used for this run only and never stored.</small></span></label>
-      <label class="radio"><input type="radio" name="engine" value="offline">
-        <span><b>Offline baseline</b><small>No API: keyword heuristics. Shows the pipeline and validators, not judgement.</small></span></label>
+    <section class="panel-box">
+      <h3 class="label">Engine</h3>
+      <label class="choice"><input type="radio" name="engine" value="cloud" checked>
+        <span class="choice-body"><b>Server models</b><small>Gemini Flash-Lite with a Groq fallback. The sample show replays instantly.</small></span></label>
+      <label class="choice"><input type="radio" name="engine" value="custom">
+        <span class="choice-body"><b>Your own API key</b><small>Any LiteLLM model. The key is used for this run only and never stored.</small></span></label>
+      <label class="choice"><input type="radio" name="engine" value="offline">
+        <span class="choice-body"><b>Offline baseline</b><small>No API. Keyword heuristics: shows the pipeline, not the judgement.</small></span></label>
+
+      <div id="custom-box" class="sub-box" hidden>
+        <label class="field">Model
+          <select id="model-select"></select>
+        </label>
+        <label class="field" id="custom-model-wrap" hidden>LiteLLM model string
+          <input id="custom-model" placeholder="provider/model-name" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="field">API key
+          <input id="api-key" type="password" placeholder="Stays in this tab" autocomplete="off">
+        </label>
+      </div>
     </section>
 
-    <section id="custom-box" hidden>
-      <label class="field">Model
-        <select id="model-select"></select>
-      </label>
-      <label class="field" id="custom-model-wrap" hidden>LiteLLM model string
-        <input id="custom-model" placeholder="provider/model-name" autocomplete="off" spellcheck="false">
-      </label>
-      <label class="field">API key
-        <input id="api-key" type="password" placeholder="pasted key stays in this tab" autocomplete="off">
-      </label>
-    </section>
-
-    <section>
-      <h2>Mode</h2>
+    <section class="panel-box">
+      <h3 class="label">Run mode</h3>
       <div class="seg" role="radiogroup" aria-label="Run mode">
         <label><input type="radio" name="mode" value="fast" checked><span>Fast</span></label>
         <label><input type="radio" name="mode" value="full"><span>Full</span></label>
       </div>
-      <small class="hint">Fast: judge the top 15 candidates. Full: judge up to 40 (more calls).</small>
-      <label class="check"><input type="checkbox" id="duels"> Enable pairwise duels <small>(+30 calls)</small></label>
+      <small class="hint">Fast judges the top 15 candidates; Full judges up to 40.</small>
+
+      <label class="toggle"><input type="checkbox" id="duels"><span class="track" aria-hidden="true"></span>
+        <span>Head-to-head duels <small>+30 calls</small></span></label>
+
       <div class="field">Max repair rounds
         <div class="seg" role="radiogroup" aria-label="Max repair rounds">
           <label><input type="radio" name="repair" value="0"><span>0</span></label>
@@ -66,38 +96,47 @@
       </div>
     </section>
 
-    <details class="pass">
+    <details class="panel-box pass">
       <summary>Demo passcode</summary>
-      <input id="passcode" type="password" placeholder="unlocks uploads on server models" autocomplete="off">
+      <input id="passcode" type="password" placeholder="Unlocks uploads on server models" autocomplete="off">
     </details>
     <p class="hint" id="server-note"></p>
   </aside>
 
   <main>
-    <nav class="tabs" role="tablist">
-      <button role="tab" data-tab="run" aria-selected="true">1 · Upload &amp; Run</button>
-      <button role="tab" data-tab="review" aria-selected="false">2 · Editor Review <span id="review-dot" class="dot" hidden></span></button>
-      <button role="tab" data-tab="quality" aria-selected="false">3 · Quality &amp; Exports</button>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button role="tab" data-tab="run" aria-selected="true"><span class="num">1</span>Upload &amp; run</button>
+      <button role="tab" data-tab="review" aria-selected="false"><span class="num">2</span>Editor review<span id="review-dot" class="dot" hidden></span></button>
+      <button role="tab" data-tab="quality" aria-selected="false"><span class="num">3</span>Quality &amp; exports</button>
     </nav>
 
-    <section class="panel" id="tab-run" role="tabpanel">
+    <section class="tabpanel" id="tab-run" role="tabpanel">
       <div class="sources">
-        <div class="card source">
-          <h3>Sample show</h3>
-          <p id="sample-desc">Three invented episodes (no real show content).</p>
-          <button class="btn primary" id="run-sample">Load 3 sample episodes &amp; run</button>
-        </div>
-        <div class="card source">
+        <article class="source sample">
+          <div class="poster" aria-hidden="true">
+            <span class="poster-ep">EP 1–3</span>
+            <span class="poster-title" id="sample-title">Sample show</span>
+          </div>
+          <div class="source-body">
+            <h3>Try the sample show</h3>
+            <p id="sample-desc">Three invented episodes, no real show content.</p>
+            <button class="btn primary" id="run-sample">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M8 5.5l11 6.5-11 6.5z" fill="currentColor"/></svg>
+              Run on 3 sample episodes</button>
+          </div>
+        </article>
+        <article class="source">
           <h3>Your screenplays</h3>
           <label id="drop" class="drop" tabindex="0">
             <input type="file" id="files" accept=".txt,text/plain" multiple hidden>
-            <span>Drop episode <code>.txt</code> files here or <u>browse</u></span>
+            <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="M12 3l5 5h-3v6h-4V8H7zm-7 14h14v4H5z"/></svg>
+            <span>Drop episode <code>.txt</code> files or <u>browse</u></span>
             <small id="limits"></small>
           </label>
           <ul id="file-list" class="file-list"></ul>
           <input id="title" class="title-in" placeholder="Show title (optional)">
           <button class="btn" id="run-upload" disabled>Run on uploaded episodes</button>
-        </div>
+        </article>
       </div>
 
       <div id="status" class="status" hidden></div>
@@ -105,33 +144,52 @@
       <div id="progress" class="card" hidden>
         <div class="prog-head">
           <h3>Pipeline</h3>
-          <span id="elapsed" class="muted"></span>
+          <span id="elapsed" class="meta"></span>
         </div>
-        <ol id="stages" class="stages"></ol>
-        <div id="models" class="models"></div>
-        <details class="log-wrap" open>
+        <ol id="stages" class="stepper"></ol>
+        <details class="log-wrap">
+          <summary>Model routing</summary>
+          <div id="models" class="models"></div>
+        </details>
+        <details class="log-wrap">
           <summary>Event log</summary>
           <ol id="log" class="log"></ol>
         </details>
       </div>
     </section>
 
-    <section class="panel" id="tab-review" role="tabpanel" hidden>
-      <div id="review-empty" class="empty">Run the pipeline first. When it reaches the editor step, the top promos appear here for review.</div>
+    <section class="tabpanel" id="tab-review" role="tabpanel" hidden>
+      <div id="review-empty" class="empty">
+        <div class="empty-art" aria-hidden="true"><i></i><i></i><i></i></div>
+        <h3>No promos to review yet</h3>
+        <p>Run the pipeline. When it reaches the editor step, the shortlist appears here as cards.</p>
+      </div>
       <div id="review-box" hidden>
         <div class="review-head">
           <div>
             <h3 id="review-title">Editor review</h3>
-            <p class="muted">Approve, reject with a reason, or nudge a cut. Rejected promos are backfilled from the reserve and the graph re-ranks. Nudges snap to the nearest legal cut and are re-validated; an invalid nudge is dropped.</p>
+            <p class="meta">Decide every promo: approve it, reject it with a reason, or nudge a cut. Rejected promos are replaced from the reserve and the list is re-ranked. Nudges snap to the nearest legal cut and are checked again; an invalid nudge is dropped.</p>
+            <p id="reserve-note" class="reserve-note" hidden></p>
           </div>
-          <button class="btn primary" id="resume">Resume graph</button>
         </div>
+        <div class="decision-bar">
+          <div id="decision-sum" class="decision-sum" aria-live="polite"></div>
+          <div class="decision-actions">
+            <button class="btn" id="approve-rest">Approve the rest</button>
+            <button class="btn primary" id="resume" disabled>Finalize promos</button>
+          </div>
+        </div>
+        <div id="legend" class="legend" aria-label="Card colour = promo type"></div>
         <div id="cards" class="cards"></div>
       </div>
     </section>
 
-    <section class="panel" id="tab-quality" role="tabpanel" hidden>
-      <div id="quality-empty" class="empty">Quality numbers and downloads appear once a run has written its outputs.</div>
+    <section class="tabpanel" id="tab-quality" role="tabpanel" hidden>
+      <div id="quality-empty" class="empty">
+        <div class="empty-art" aria-hidden="true"><i></i><i></i><i></i></div>
+        <h3>Nothing measured yet</h3>
+        <p>Quality numbers and downloads appear once a run has written its outputs.</p>
+      </div>
       <div id="quality-box" hidden>
         <div id="tiles" class="tiles"></div>
         <div class="two">
@@ -144,7 +202,11 @@
   </main>
 </div>
 
-<footer class="foot">Hosted demo runs at most 6 episodes. Run a full show locally with <code>python run.py --show &lt;folder&gt;</code>.</footer>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<footer class="foot">
+  <p>The hosted demo runs up to 6 episodes. Run a full show locally with <code>python run.py --show &lt;folder&gt;</code>.</p>
+  <p class="disclaimer">Independent prototype built for the Kuku FM AI Generalist assignment. Not an official Kuku FM product; the Kuku name and logo belong to Kuku FM.</p>
+</footer>
 <script src="app.js"></script>
 </body>
 </html>

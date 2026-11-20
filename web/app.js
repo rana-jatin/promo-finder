@@ -11,7 +11,7 @@ const store = {
 
 const S = { cfg: null, runId: null, timer: null, files: [], decisions: {}, reviewKey: null, last: null, qualityFor: null };
 
-// ---------------------------------------------------------------- API
+// ---------------------------------------------------------------- API + feedback
 async function api(path, opts = {}) {
   const res = await fetch(path, opts);
   let body = null;
@@ -22,6 +22,26 @@ async function api(path, opts = {}) {
     throw err;
   }
   return body;
+}
+
+function toast(msg) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { t.hidden = true; }, 6000);
+}
+
+// ---------------------------------------------------------------- theme
+function currentTheme() {
+  const set = document.documentElement.dataset.theme;
+  if (set) return set;
+  return matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+function toggleTheme() {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  store.set("theme", next);
 }
 
 // ---------------------------------------------------------------- settings
@@ -69,6 +89,7 @@ function syncSettingsUI() {
 function showTab(name) {
   $$(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
   ["run", "review", "quality"].forEach((t) => { $("#tab-" + t).hidden = t !== name; });
+  $("#layout").classList.toggle("no-side", name !== "run"); // run settings only matter on the run tab
   if (name === "review") $("#review-dot").hidden = true;
   if (name === "quality" && S.runId) loadQuality();
 }
@@ -76,7 +97,9 @@ function showTab(name) {
 // ---------------------------------------------------------------- uploads
 function setFiles(list) {
   const max = S.cfg ? S.cfg.limits.max_files : 6;
-  S.files = [...list].filter((f) => f.name.toLowerCase().endsWith(".txt")).slice(0, max);
+  const all = [...list].filter((f) => f.name.toLowerCase().endsWith(".txt"));
+  if (all.length > max) toast(`Only the first ${max} episodes are used in the hosted demo.`);
+  S.files = all.slice(0, max);
   $("#file-list").innerHTML = S.files.map((f) => `<li>${esc(f.name)} · ${(f.size / 1000).toFixed(1)} KB</li>`).join("");
   $("#run-upload").disabled = !S.files.length;
 }
@@ -93,7 +116,7 @@ async function startRun(source) {
     const { run_id } = await api("/api/runs", { method: "POST", body: fd });
     attach(run_id);
   } catch (e) {
-    showStatus("error", e.message);
+    showStatus("error", esc(e.message));
     setBusy(false);
   }
 }
@@ -115,7 +138,7 @@ async function poll() {
   try {
     snap = await api(`/api/runs/${S.runId}`);
   } catch (e) {
-    showStatus("error", e.status === 404 ? e.message : `Lost contact with the server (${e.message}). Retrying…`);
+    showStatus("error", esc(e.status === 404 ? e.message : `Lost contact with the server (${e.message}). Retrying…`));
     if (e.status !== 404) S.timer = setTimeout(poll, 4000);
     else setBusy(false);
     return;
@@ -144,39 +167,69 @@ function showStatus(kind, html) {
   el.innerHTML = html;
 }
 
-const STAGE_LABEL = { parse: "parse", bible: "show bible", mine: "mine", link: "link arcs", assemble: "assemble",
-  refine: "judge + repair", coverage: "coverage", select: "select", duel: "duels", order: "rank", write: "write", editor: "editor" };
+const STAGE_LABEL = { parse: "Parse", bible: "Bible", mine: "Mine", link: "Link arcs", assemble: "Assemble",
+  refine: "Judge + repair", coverage: "Coverage", select: "Select", duel: "Duels", order: "Rank", write: "Write", editor: "Editor" };
 
 function renderProgress(s) {
-  $("#stages").innerHTML = s.stages.map((st) => {
-    const n = st.started > 1 ? ` ${st.finished}/${st.started}` : "";
-    return `<li class="${st.state}">${esc(STAGE_LABEL[st.name] || st.name)}${esc(n)}</li>`;
+  const lastActive = s.stages.reduce((k, st, i) => (st.state !== "pending" ? i : k), -1);
+  $("#stages").innerHTML = s.stages.map((st, i) => {
+    const skipped = st.state === "pending" && i < lastActive; // e.g. duels switched off
+    const state = skipped ? "skipped" : st.state;
+    const mark = state === "done" ? "✓" : state === "waiting" ? "❚❚" : skipped ? "–" : String(i + 1);
+    const cnt = skipped ? "skipped" : st.started > 1 ? `${st.finished}/${st.started}` : "";
+    return `<li class="${state}"><span class="node">${mark}</span><span>${esc(STAGE_LABEL[st.name] || st.name)}</span><span class="cnt">${esc(cnt)}</span></li>`;
   }).join("");
   $("#log").innerHTML = s.log.map((l) => `<li><span>${l.t.toFixed(1)}s</span>${esc(l.msg)}</li>`).join("");
   const logEl = $("#log");
   logEl.scrollTop = logEl.scrollHeight;
   $("#models").innerHTML = s.models.map((m) => `<div>${esc(m)}</div>`).join("");
-  const calls = s.llm && s.llm.calls ? ` · ${s.llm.calls} API calls` : "";
-  const hits = s.llm && s.llm.cache_hits ? ` · ${s.llm.cache_hits} cache hits` : "";
-  const cost = s.llm && s.llm.cost_usd ? ` · ~$${s.llm.cost_usd.toFixed(3)}` : "";
-  $("#elapsed").textContent = `${s.elapsed_s.toFixed(0)} s${calls}${hits}${cost}`;
+  $("#elapsed").innerHTML = runCostLine(s);
   const msg = {
     queued: "Queued: waiting for a free worker…",
-    running: "Running the graph… you can switch tabs; progress keeps updating.",
-    review: `Editor review ready (round ${(s.review ? s.review.round : 0) + 1}). <button class="btn small primary" data-go="review">Open review</button>`,
-    done: `Done. <button class="btn small" data-go="quality">See quality &amp; downloads</button>`,
+    running: "Running the graph. You can switch tabs; progress keeps updating.",
+    review: `<span>Your shortlist is ready for review (round ${(s.review ? s.review.round : 0) + 1}).</span><button class="btn small primary" data-go="review">Open review</button>`,
+    done: `<span>Done. Final ranking written.</span><button class="btn small" data-go="quality">Quality &amp; downloads</button>`,
     error: "Stopped: " + esc(s.error || "unknown error"),
   }[s.status];
   showStatus(s.status, msg);
 }
 
-// ---------------------------------------------------------------- review
-function fmtSeg(seg) { return `E${String(seg.episode).padStart(2, "0")} ${seg.start} → ${seg.end}`; }
+const fmtDur = (sec) => (sec >= 60 ? `${Math.floor(sec / 60)}m${String(Math.round(sec % 60)).padStart(2, "0")}s` : `${sec.toFixed(sec < 10 ? 1 : 0)} s`);
+const isReplay = (llm) => !!llm && !llm.calls && !!llm.cache_hits;
 
-function scoreRows(sc) {
+// One honest line about time and cost: a replay says so, and quotes the run that recorded the answers.
+function runCostLine(s) {
+  const llm = s.llm || {};
+  if (isReplay(llm)) {
+    const r = s.recorded;
+    const orig = r ? ` · recorded run: <b>${r.calls} calls · ${fmtDur(r.seconds)} · $${r.cost_usd.toFixed(3)}</b>` : "";
+    return `<span class="replay">Replayed ${llm.cache_hits} recorded answers (0 new calls)${orig}</span>`;
+  }
+  const parts = [fmtDur(s.elapsed_s || 0)];
+  if (llm.calls) parts.push(`${llm.calls} API calls`);
+  if (llm.cache_hits) parts.push(`${llm.cache_hits} cached`);
+  if (llm.cost_usd) parts.push(`~$${llm.cost_usd.toFixed(3)}`);
+  if (llm.offline) parts.push("offline, no API");
+  return esc(parts.join(" · "));
+}
+
+// ---------------------------------------------------------------- review cards
+const TEMPLATE_LABEL = { continuous: "Continuous", cold_open: "Cold open", bridge: "Episode bridge", arc_stitch: "Arc stitch" };
+const toSec = (ts) => String(ts).split(":").reduce((a, p) => a * 60 + Number(p), 0);
+const fmtSeg = (seg) => `E${String(seg.episode).padStart(2, "0")}  ${seg.start} → ${seg.end}`;
+
+function clipStrip(p) {
+  const lens = p.segments.map((s) => Math.max(0.1, toSec(s.end) - toSec(s.start)));
+  const total = lens.reduce((a, b) => a + b, 0) || 1;
+  const segs = p.segments.map((s, i) => `<span class="s" style="flex:${lens[i]}" title="${esc(fmtSeg(s))}">E${String(s.episode).padStart(2, "0")} · ${lens[i].toFixed(0)}s</span>`).join("");
+  const hook = p.hook_at_s != null ? `<i class="hook" style="left:${Math.min(98, (p.hook_at_s / total) * 100)}%" title="hook at ${p.hook_at_s.toFixed(1)} s"></i>` : "";
+  return `<div class="strip" aria-label="Clip structure">${segs}${hook}<i class="cliff" title="cliffhanger at the cut"></i></div>`;
+}
+
+function rings(sc) {
   if (!sc) return "";
-  const rows = [["Hook", sc.hook], ["Cliff", sc.cliff], ["Standalone", sc.standalone], ["Trope", sc.trope], ["Pace", sc.pace]];
-  return `<div class="scores">${rows.map(([k, v]) => `<span>${k}</span><div class="bar"><i style="width:${Math.max(0, Math.min(100, ((v || 0) / 5) * 100))}%"></i></div><span>${(v ?? 0).toFixed(1)}</span>`).join("")}</div>`;
+  const rows = [["Hook", sc.hook], ["Cliff", sc.cliff], ["Alone", sc.standalone], ["Trope", sc.trope], ["Pace", sc.pace]];
+  return `<div class="scores">${rows.map(([k, v]) => `<div class="score"><div class="ring" style="--p:${Math.max(0, Math.min(100, ((v || 0) / 5) * 100))}"><span>${(v ?? 0).toFixed(1)}</span></div>${k}</div>`).join("")}</div>`;
 }
 
 function renderReview(review) {
@@ -185,59 +238,110 @@ function renderReview(review) {
   $("#review-empty").hidden = true;
   $("#review-box").hidden = false;
   $("#resume").disabled = false;
+  if ($("#tab-review").hidden) $("#review-dot").hidden = false;
   if (S.reviewKey === key) return; // keep the editor's half-made decisions across polls
   S.reviewKey = key;
   S.decisions = {};
-  $("#review-title").textContent = `Editor review · round ${review.round + 1} · ${review.shortlist.length} promos · ${review.reserve} in reserve`;
+  S.reserve = review.reserve;
+  $("#review-title").textContent = `Round ${review.round + 1} · ${review.shortlist.length} promos · ${review.reserve} in reserve`;
+  const held = Object.entries(review.held_back || {}).filter(([r]) => r !== "rejected by the editor");
+  const heldTxt = held.length ? ` ${held.reduce((a, [, n]) => a + n, 0)} other eligible promo(s) were held back: ${held.map(([r, n]) => `${n} ${r}`).join(", ")}.` : "";
+  const note = $("#reserve-note");
+  note.hidden = !(review.reserve === 0 || heldTxt);
+  note.textContent = review.reserve === 0
+    ? `No reserve left: rejecting a promo removes it, with no replacement.${heldTxt}`
+    : `${review.reserve} promo(s) in reserve will replace rejects, best first.${heldTxt}`;
+  const types = [...new Set(review.shortlist.map((p) => p.template))];
+  $("#legend").innerHTML = "<span>Card colour = promo type:</span>" + types.map((t) => `<span><i style="--c:var(--t-${/^[a-z_]+$/.test(t) ? t : "continuous"})"></i>${esc(TEMPLATE_LABEL[t] || t)}</span>`).join("");
   $("#cards").innerHTML = review.shortlist.map((p) => {
     const hookOk = p.hook_at_s != null && p.hook_at_s <= 3;
+    const tc = `var(--t-${/^[a-z_]+$/.test(p.template) ? p.template : "continuous"}, var(--accent))`;
     const badges = [
-      `<span class="badge accent">${esc(p.template)}</span>`,
-      `<span class="badge">${p.duration_s.toFixed(1)} s</span>`,
-      p.hook_at_s != null ? `<span class="badge ${hookOk ? "good" : "warn"}">hook @ ${p.hook_at_s.toFixed(1)} s</span>` : "",
-      p.trope ? `<span class="badge">${esc(p.trope)}</span>` : "",
-      p.in_free_window ? `<span class="badge good">free window</span>` : "",
+      p.trope ? `<span class="badge">${esc(p.trope.replace(/_/g, " "))}</span>` : "",
+      p.in_free_window ? `<span class="badge good">free-episode window</span>` : "",
       p.spoiler ? `<span class="badge warn">spoiler</span>` : "",
-      ...(p.repairs || []).map((r) => `<span class="badge">repaired: ${esc(r)}</span>`),
+      ...(p.repairs || []).map((r) => `<span class="badge">repaired: ${esc(r.replace(/_/g, " "))}</span>`),
       ...(p.flags || []).map((f) => `<span class="badge warn">${esc(f)}</span>`),
     ].join("");
     const nudgeRows = p.segments.map((s) => `<div class="nudge-row"><span>seg ${s.seg}</span>
-        <input data-nudge="${esc(p.cand_id)}" data-seg="${s.seg}" data-side="start" placeholder="start ${esc(s.start)} or -0.5">
-        <input data-nudge="${esc(p.cand_id)}" data-seg="${s.seg}" data-side="end" placeholder="end ${esc(s.end)} or +1.0"></div>`).join("");
-    return `<article class="card promo" data-cand="${esc(p.cand_id)}">
-      <div class="promo-top"><span class="rank">${esc(p.promo_id)}</span><span class="badge">final ${(p.final_score ?? 0).toFixed(2)}</span></div>
-      <div class="badges">${badges}</div>
-      <div class="segs">${p.segments.map((s) => `<span>${esc(fmtSeg(s))}</span>`).join("")}</div>
-      <div class="beat"><b>Hook</b>${esc(p.hook)}</div>
-      <div class="beat"><b>Cliffhanger</b>${esc(p.cliff)}</div>
-      <div class="beat"><b>Open question</b>${esc(p.open_question || "-")}</div>
-      <p class="why">${esc(p.why || "")}</p>
-      ${scoreRows(p.scores)}
-      <div class="actions">
-        <button class="btn small" data-act="approve" aria-pressed="true">Approve</button>
-        <button class="btn small rej" data-act="reject" aria-pressed="false">Reject</button>
-        <button class="btn small" data-act="nudge" aria-pressed="false">Nudge</button>
+        <input data-nudge="${esc(p.cand_id)}" data-seg="${s.seg}" data-side="start" placeholder="start ${esc(s.start)}" aria-label="New start for segment ${s.seg}">
+        <input data-nudge="${esc(p.cand_id)}" data-seg="${s.seg}" data-side="end" placeholder="end ${esc(s.end)}" aria-label="New end for segment ${s.seg}"></div>`).join("");
+    return `<article class="promo pending" data-cand="${esc(p.cand_id)}" style="--tc:${tc}">
+      <div class="cover">
+        <div class="cover-top">
+          <div><div class="rank">#${p.rank}<small>${esc(p.promo_id)}</small></div>${p.rank === 1 ? `<span class="ribbon">Post first</span>` : ""}</div>
+          <span class="score-pill">${(p.final_score ?? 0).toFixed(2)}<small> / 5</small></span>
+        </div>
+        <div class="cover-meta">
+          <span>${esc(TEMPLATE_LABEL[p.template] || p.template)}</span>
+          <span>${p.duration_s.toFixed(1)} s</span>
+          ${p.hook_at_s != null ? `<span>${hookOk ? "⚡" : "⚠"} hook at ${p.hook_at_s.toFixed(1)} s</span>` : ""}
+        </div>
+        ${clipStrip(p)}
       </div>
-      <div class="extra" data-extra="reject" hidden><input data-reason="${esc(p.cand_id)}" placeholder="Reason (e.g. hook too slow, spoils Ep 3)"></div>
-      <div class="extra" data-extra="nudge" hidden>${nudgeRows}<small class="hint">Absolute time (01:02.50) or a shift in seconds (-0.5, +1).</small></div>
+      <div class="promo-body">
+        <div class="segs">${p.segments.map((s) => `<span>${esc(fmtSeg(s))}</span>`).join("")}</div>
+        <p class="line"><b><span>Hook</span></b>${esc(p.hook)}</p>
+        <p class="line cliff"><b><span>Cliffhanger</span></b>${esc(p.cliff)}</p>
+        <p class="question">${esc(p.open_question || "-")}</p>
+        ${p.why ? `<p class="why">${esc(p.why)}</p>` : ""}
+        ${badges ? `<div class="badges">${badges}</div>` : ""}
+        ${rings(p.scores)}
+        <div class="actions" role="group" aria-label="Decision for ${esc(p.promo_id)}">
+          <button type="button" data-act="approve" aria-pressed="false">Approve</button>
+          <button type="button" data-act="reject" aria-pressed="false">Reject</button>
+          <button type="button" data-act="nudge" aria-pressed="false">Nudge</button>
+        </div>
+        <div class="extra" data-extra="reject" hidden><input data-reason="${esc(p.cand_id)}" placeholder="Why? e.g. hook too slow, spoils Ep 3" aria-label="Reject reason"></div>
+        <div class="extra" data-extra="nudge" hidden>${nudgeRows}<small class="hint">Absolute time (01:02.50) or a shift in seconds (-0.5, +1).</small></div>
+      </div>
     </article>`;
   }).join("");
-  $("#review-dot").hidden = !$("#tab-review").hidden ? true : false;
+  updateDecisionSummary();
 }
 
 function renderReviewDone() {
   if (!$("#review-box").hidden) {
     $("#resume").disabled = true;
-    $("#review-title").textContent = "Review finished: final ranking written (see Quality & Exports).";
+    $("#approve-rest").disabled = true;
+    $("#resume").textContent = "Finalized";
+    $("#review-title").textContent = "Review finished. The final ranking is in Quality & exports.";
+    $("#decision-sum").textContent = "";
+    $("#reserve-note").hidden = true;
   }
 }
 
 function setAction(card, act) {
-  $$(".actions .btn", card).forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.act === act)));
+  $$(".actions button", card).forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.act === act)));
   $$(".extra", card).forEach((x) => { x.hidden = x.dataset.extra !== act; });
+  card.classList.remove("pending");
   card.classList.toggle("rejected", act === "reject");
   card.classList.toggle("nudged", act === "nudge");
   S.decisions[card.dataset.cand] = act;
+  updateDecisionSummary();
+  const focus = $(`.extra[data-extra="${act}"] input`, card);
+  if (focus) focus.focus();
+}
+
+function updateDecisionSummary() {
+  const acts = $$("#cards .promo").map((c) => S.decisions[c.dataset.cand] || "pending");
+  const n = (a) => acts.filter((x) => x === a).length;
+  const pending = n("pending"), rej = n("reject"), keep = n("approve") + n("nudge");
+  $("#decision-sum").innerHTML = [
+    pending ? `<span class="pending">${pending} to decide</span>` : "",
+    `<span class="approve">${n("approve")} approved</span>`, `<span class="reject">${rej} rejected</span>`,
+    `<span class="nudge">${n("nudge")} nudged</span>`].join("");
+  const btn = $("#resume");
+  btn.disabled = pending > 0 || !acts.length;
+  btn.textContent = pending > 0 ? `Decide all ${acts.length} to finish`
+    : rej === 0 ? `Finalize ${keep} promo${keep === 1 ? "" : "s"}`
+      : (S.reserve || 0) > 0 ? `Replace ${rej} from reserve & re-rank`
+        : `Finalize ${keep} (${rej} removed, no replacement)`;
+  $("#approve-rest").disabled = pending === 0;
+}
+
+function approveRest() {
+  $$("#cards .promo").filter((c) => !S.decisions[c.dataset.cand]).forEach((c) => setAction(c, "approve"));
 }
 
 function collectDecisions() {
@@ -269,18 +373,18 @@ async function resume() {
   try {
     await api(`/api/runs/${S.runId}/resume`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decisions }) });
     S.reviewKey = null;
-    $("#review-title").textContent = "Resuming graph: backfilling and re-ranking…";
+    $("#review-title").textContent = "Resuming: backfilling and re-ranking…";
     showTab("run");
     poll();
   } catch (e) {
     $("#resume").disabled = false;
-    alert(e.message);
+    toast(e.message);
   }
 }
 
 // ---------------------------------------------------------------- quality
-const FILE_NOTES = { "ranked.json": "final promos + reserve", "candidates.jsonl": "every judged candidate", "report.md": "human-readable report",
-  "run_meta.json": "models, calls, cost", "decisions.jsonl": "editor decisions log", "bible.json": "show bible" };
+const FILE_NOTES = { "ranked.json": "final promos + reserve", "candidates.jsonl": "every judged candidate", "report.md": "readable report",
+  "run_meta.json": "models, calls, cost", "decisions.jsonl": "editor decisions", "bible.json": "show bible" };
 
 async function loadQuality() {
   if (!S.runId || !S.last || !S.last.files.includes("ranked.json")) return;
@@ -293,15 +397,30 @@ async function loadQuality() {
   $("#quality-box").hidden = false;
   const pct = (v) => (v == null ? "–" : `${Math.round(v * 100)}%`);
   const llm = q.llm || {};
+  const rec = q.recorded;
+  const replay = isReplay(llm);
+  const costTiles = replay && rec
+    ? [[rec.calls, "API calls", "in the recorded run; this replay made 0"], [`$${rec.cost_usd.toFixed(3)}`, "cost", "of the recorded run; this replay was free"],
+       [fmtDur(rec.seconds), "run time", "of the recorded run"]]
+    : replay
+      ? [[0, "new API calls", `${llm.cache_hits} answers replayed from cache`], ["$0", "cost of this replay", ""]]
+      : llm.offline ? [["offline", "engine", "no API: keyword heuristics"]]
+        : [[llm.calls ?? 0, "API calls", llm.cache_hits ? `+ ${llm.cache_hits} cached` : ""], [`$${(llm.cost_usd || 0).toFixed(3)}`, "estimated cost", ""],
+           [fmtDur(q.seconds || 0), "run time", ""]];
   const tiles = [
-    [q.pool, "candidates assembled"], [q.rejected_by_code, "rejected by code validators"], [q.judged, "judged cold"],
-    [pct(q.pass_rate), "eligible after judge + repair"], [`${q.repaired}`, "candidates repaired"], [pct(q.repair_yield), "repair yield"],
-    [llm.calls ?? 0, "API calls"], [llm.cache_hits ?? 0, "cache hits"], [llm.cost_usd != null ? `$${llm.cost_usd.toFixed(3)}` : "$0", "est. cost"],
+    [pct(q.pass_rate), "eligible after judge + repair", "", true], [pct(q.repair_yield), "repair yield", `${q.repaired} repaired`, true],
+    [q.pool, "candidates assembled", `${q.rejected_by_code} more rejected by code`], [q.judged, "judged cold", ""],
+    [q.reserve ?? 0, "in reserve", "promoted if you reject"],
+    ...costTiles.map(([v, k, sub]) => [v, k, sub]),
   ];
-  $("#tiles").innerHTML = tiles.map(([v, k]) => `<div class="tile"><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`).join("");
-  const fails = Object.entries(q.failures || {}).sort((a, b) => b[1] - a[1]);
+  $("#tiles").innerHTML = tiles.map(([v, k, sub, hl]) => `<div class="tile${hl ? " hl" : ""}"><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div>${sub ? `<div class="sub">${esc(sub)}</div>` : ""}</div>`).join("");
+  // clean passes first and green; every failure type in red
+  const fails = Object.entries(q.failures || {}).sort((a, b) => (a[0] === "clean pass" ? -1 : b[0] === "clean pass" ? 1 : b[1] - a[1]));
   const max = Math.max(1, ...fails.map(([, n]) => n));
-  $("#fails").innerHTML = fails.map(([k, n]) => `<span>${esc(k)}</span><div class="bar"><i style="width:${(n / max) * 100}%"></i></div><span>${n}</span>`).join("") || "<span class='muted'>no judged candidates</span>";
+  $("#fails").innerHTML = fails.map(([k, n]) => {
+    const ok = k === "clean pass" || k === "none";
+    return `<span>${esc(ok ? "Clean pass" : k.replace(/_/g, " "))}</span><div class="bar"><i class="${ok ? "good" : "bad"}" style="width:${(n / max) * 100}%"></i></div><span>${n}</span>`;
+  }).join("") || "<span class='meta'>No judged candidates.</span>";
   $("#downloads").innerHTML = S.last.files.map((f) => `<a href="/api/runs/${S.runId}/files/${f}" download>${esc(f)} <small>${esc(FILE_NOTES[f] || "")}</small></a>`).join("");
   try {
     const md = await (await fetch(`/api/runs/${S.runId}/files/report.md`)).text();
@@ -320,7 +439,7 @@ function miniMarkdown(md) {
     let m;
     if (!line.trim()) { close(); continue; }
     if ((m = line.match(/^(#{1,3})\s+(.*)$/))) { close(); out.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`); continue; }
-    if ((m = line.match(/^>\s?(.*)$/))) { close(); out.push(`<p class="muted">${inline(m[1])}</p>`); continue; }
+    if ((m = line.match(/^>\s?(.*)$/))) { close(); out.push(`<p class="meta">${inline(m[1])}</p>`); continue; }
     if ((m = line.match(/^\s*[-*]\s+(.*)$/)) || (m = line.match(/^\s*\d+\.\s+(.*)$/))) {
       const kind = /^\s*\d+\./.test(line) ? "ol" : "ul";
       if (list !== kind) { close(); out.push(`<${kind}>`); list = kind; }
@@ -347,8 +466,9 @@ async function boot() {
 
   const sel = $("#model-select");
   sel.innerHTML = S.cfg.presets.map((p) => `<option value="${esc(p.id)}">${esc(p.label)}</option>`).join("") + `<option value="__custom">Custom LiteLLM string…</option>`;
-  $("#sample-desc").textContent = `"${S.cfg.sample.title}": ${S.cfg.sample.episodes.length} invented episodes (no real show content). Runs on server models from a pre-recorded cache, so it is quick and free.`;
-  $("#limits").textContent = `up to ${S.cfg.limits.max_files} episodes, ${S.cfg.limits.max_file_kb} KB each`;
+  $("#sample-title").textContent = S.cfg.sample.title || "Sample show";
+  $("#sample-desc").textContent = `${S.cfg.sample.episodes.length} invented episodes, no real show content. On server models it replays recorded answers, so it finishes in about a second and costs nothing.`;
+  $("#limits").textContent = `Up to ${S.cfg.limits.max_files} episodes, ${S.cfg.limits.max_file_kb} KB each`;
   $("#server-note").textContent = S.cfg.server_keys ? "" : "This server has no API keys set: use the offline engine or your own key.";
   restoreSettings();
   syncSettingsUI();
@@ -363,6 +483,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $$("input[name=engine], input[name=mode], input[name=repair], #duels").forEach((el) => el.addEventListener("change", syncSettingsUI));
   $("#model-select").addEventListener("change", syncSettingsUI);
   $("#custom-model").addEventListener("input", saveSettings);
+  $("#theme").addEventListener("click", toggleTheme);
   $$(".tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
   $("#run-sample").addEventListener("click", () => startRun("sample"));
   $("#run-upload").addEventListener("click", () => startRun("upload"));
@@ -378,5 +499,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (b) setAction(b.closest(".promo"), b.dataset.act);
   });
   $("#resume").addEventListener("click", resume);
+  $("#approve-rest").addEventListener("click", approveRest);
   boot();
 });

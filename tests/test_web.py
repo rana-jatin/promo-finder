@@ -115,3 +115,27 @@ def test_api_policy(monkeypatch, tmp_path):
     assert s["status"] == "review", s
     assert c.get(f"/api/runs/{rid}/files/runs.db").status_code == 404
     assert c.get(f"/api/runs/{rid}/files/ranked.json").status_code == 200
+
+
+def test_clip_text_cuts_at_a_word_boundary():
+    from src.rank import clip_text
+    q = "Who does the locket really belong to, and what is the deckhand's true identity, caught by the old man?"
+    out = clip_text(q, 60)
+    assert out.endswith("…") and len(out) <= 61
+    assert q.startswith(out[:-1]) and q[len(out) - 1] == " "  # cut lands on a space, never mid-word
+    assert clip_text("short question?", 60) == "short question?"
+
+
+def test_select_reports_why_eligible_promos_were_held_back():
+    from src.rank import select
+    cfg = {"select": {"shortlist": 3, "reserve": 2, "iou_dedupe": 0.5, "max_per_episode": 2, "max_per_trope": 9}}
+
+    def cand(i, ep, start):
+        return {"cand_id": f"C{i}", "eligible": True, "hook": {"ep": ep}, "trope": "other",
+                "segments": [{"ep": ep, "start": start, "end": start + 30.0}]}
+
+    scored = [cand(1, 1, 0), cand(2, 1, 100), cand(3, 1, 200), cand(4, 2, 0), cand(5, 2, 2), cand(6, 3, 0)]
+    why = {}
+    short, reserve = select(scored, ["C6"], cfg, why=why)
+    assert [c["cand_id"] for c in short + reserve] == ["C1", "C2", "C4"]
+    assert why == {"over the 2-per-episode cap": 1, "overlaps a higher-ranked promo": 1, "rejected by the editor": 1}

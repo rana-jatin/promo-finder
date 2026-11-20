@@ -25,13 +25,16 @@ OUTPUTS = ROOT / "outputs"
 
 # run folder -> what it is (the first one is the submitted answer)
 RUNS = {
-    "show1": "FINAL ANSWER. Full 50-episode run, current model routes, duels on, 2 repair rounds.",
-    "show1-r0": "Ablation of the final run: same models, refine loop off (--max-repair-rounds 0).",
-    "show1-v1": "Earlier full run on the first routes (Gemini Flash / flash-lite mining, gpt-5-nano judge). "
+    "show1": "FINAL ANSWER. Full 50-episode run on the v3 prompts, current model routes, duels on, 2 repair rounds.",
+    "show1-r0": "Ablation of the final run: same prompts and models, refine loop off (--max-repair-rounds 0).",
+    "show1-v2": "Previous full run: same model routes, v1 prompts (logs/full_run_v2.log).",
+    "show1-v2-r0": "Ablation of the previous run: refine loop off.",
+    "show1-v1": "Earliest full run on the first routes (Gemini Flash / flash-lite mining, gpt-5-nano judge). "
                 "Original run: 343 s, 115 API calls (logs/full_run.log); this folder is its cached rerun.",
-    "show1-v1-r0": "Ablation of the earlier run: refine loop off.",
+    "show1-v1-r0": "Ablation of the earliest run: refine loop off.",
     "show1-offline": "No-LLM baseline (--model offline): keyword heuristics only. A pipeline check, not real picks.",
-    "show1-reviewtest": "Editor-in-the-loop demo: scripted approve/reject decisions, backfill, second review round.",
+    "show1-reviewtest": "Editor-in-the-loop demo on the previous run (v1 prompts): scripted approve/reject decisions, "
+                        "backfill, second review round.",
 }
 LOG_FILES = ["*.log", "review_test_decisions.json"]
 EXTRA = {"eval/gold.json": "eval/gold.json"}  # hand-checked gold set that evaluate.py scores against
@@ -171,7 +174,11 @@ def run_line(run: str) -> str:
     cost = total.get("cost_usd")
     cost_s = f"${cost:.2f}" if isinstance(cost, (int, float)) else "$0"
     secs = f"{round(meta['seconds'])} s" if "seconds" in meta else "?"
-    return f"| `{run}/` | {RUNS[run]} | {n} | {model} | {calls} | {secs}, {cost_s} | {meta.get('finished', '?')} |"
+    # prompt set: run_meta.prompt_version (v3 onwards), else the suffix of the recorded prompt file names
+    names = sorted(set((meta.get("prompts") or {}).values()))
+    prompts = meta.get("prompt_version") or ", ".join(sorted({x.rsplit("_", 1)[-1] for x in names})) or "?"
+    return (f"| `{run}/` | {RUNS[run]} | {n} | {prompts} | {model} | {calls} | {secs}, {cost_s} | "
+            f"{meta.get('finished', '?')} |")
 
 
 def write_readme(out: Path, report: dict) -> None:
@@ -195,16 +202,21 @@ def write_readme(out: Path, report: dict) -> None:
         "",
         "## Runs",
         "",
-        "| Folder | What it is | Promos | Models | API calls / cache hits | Wall-clock, est. cost | Finished |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| Folder | What it is | Promos | Prompts | Models | API calls / cache hits | Wall-clock, est. cost | Finished |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
         *[run_line(r) for r in RUNS],
         "",
         "Cache hits replay an earlier identical prompt from the disk cache at zero cost, so the ablations and",
         "the review demo reuse the full run's mining and only pay for the calls that changed. Time and cost",
         "above are for the run that wrote the folder, not for the work it replayed.",
         "",
-        "`show1/eval_report.json` scores the four LLM runs against the gold set in `eval/gold.json`.",
-        "`logs/` holds each run's terminal output: `full_run_v2.log` → `show1/`, `r0_run_v2.log` → `show1-r0/`,",
+        "`show1/eval_report.json` scores the six LLM runs against the gold set in `eval/gold.json`",
+        "(`show1-v2/eval_report.json` is the same check as it stood after the previous run; its paths use the folder",
+        "names of that time, so its `show1` / `show1-r0` are today's `show1-v2` / `show1-v2-r0`).",
+        "Prompt files: `v1` and `v3` are `prompts/<stage>_v1.md` and `prompts/<stage>_v3.md` in the repo.",
+        "`logs/` holds each run's terminal output: `full_run_v3.log` → `show1/`, `r0_run_v3.log` → `show1-r0/`,",
+        "`eval_v3.log` → `show1/eval_report.json`, `offline_run_v3.log` → `show1-offline/`,",
+        "`full_run_v2.log` → `show1-v2/`, `r0_run_v2.log` → `show1-v2-r0/`,",
         "`full_run.log` → the original v1 run, `full_run2.log` → its cached rerun that wrote `show1-v1/`,",
         "`r0_run.log` → `show1-v1-r0/`, `reviewtest.log` + `review_test_decisions.json` → `show1-reviewtest/`.",
         "`fast_run.log` is an early `--fast` run whose folder was later overwritten by a full run.",

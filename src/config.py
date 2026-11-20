@@ -31,6 +31,22 @@ def load_config(path: str | Path | None = None, overrides: dict[str, Any] | None
         for p in parents:
             node = node.setdefault(p, {})
         node[leaf] = value
+    return resolve_prompts(cfg)
+
+
+STAGES = ("bible", "mine", "link", "judge", "duel")
+
+
+def resolve_prompts(cfg: dict) -> dict:
+    """cfg['prompts'][stage] = the prompt file name: an explicit per-stage override, else <stage>_<prompt_version>."""
+    explicit = dict(cfg.get("prompts") or {})
+    version = cfg.get("prompt_version")
+    for stage in STAGES:
+        if not explicit.get(stage):
+            if not version:
+                raise KeyError(f"config sets neither prompt_version nor prompts.{stage}")
+            explicit[stage] = f"{stage}_{version}"
+    cfg["prompts"] = explicit
     return cfg
 
 

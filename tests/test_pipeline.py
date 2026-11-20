@@ -168,6 +168,8 @@ def test_routes_hydrogen_context_flash_mine_luna_judge(tmp_path, cfg, monkeypatc
     from src.schemas import DuelVerdict
 
     monkeypatch.setenv("OPEN_API_KEY", "test-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "k1")
+    monkeypatch.setenv("GEMINI_API_KEY_1", "k2")
     c = json.loads(json.dumps(cfg))
     c["llm"]["cache_dir"] = str(tmp_path / "cache")
     for r in c["llm"]["routes"].values():
@@ -221,12 +223,44 @@ def test_routes_hydrogen_context_flash_mine_luna_judge(tmp_path, cfg, monkeypatc
     assert ask("duel", "calm clip 2") == [luna]  # back on Luna for the next call
     assert ask("judge", "capped clip") == [luna, qwen]  # daily cap
     assert ask("duel", "later clip") == [qwen]  # judge route stays on Qwen
-    assert ask("link", "capped season") == [hydrogen, flash]  # Hydrogen daily cap: context falls back to Flash
+    assert ask("link", "capped season") == [hydrogen, hydrogen, flash]  # both Gemini keys capped: context falls back to Flash
     assert ask("bible", "show 2") == [flash]  # context route stays on Flash
     assert ask("mine", "episode 2") == [flash]  # the mine route has its own state: still on Flash
     assert ask("bible", "blocked show") == [flash, oss]  # Flash refuses too: gpt-oss is the context last resort
     assert ask("mine", "blocked episode") == [flash, lite, oss]  # both Gemini refuse: gpt-oss is the mine last resort
     assert ask("mine", "episode 3") == [flash]  # a refusal moves only that one call
+
+
+def test_gemini_key_rotation(tmp_path, cfg, monkeypatch):
+    """Key 1 out of credits -> same model on key 2 for the rest of the run; both out -> next model."""
+    import litellm
+    from src.llm import LLM
+    from src.schemas import DuelVerdict
+
+    monkeypatch.setenv("GEMINI_API_KEY", "k1")
+    monkeypatch.setenv("GEMINI_API_KEY_1", "k2")
+    c = json.loads(json.dumps(cfg))
+    c["llm"]["cache_dir"] = str(tmp_path / "cache")
+    for r in c["llm"]["routes"].values():
+        for m in r["models"]:
+            m["rpm"] = None
+    calls = []
+
+    def fake(**kw):
+        calls.append((kw["model"], kw.get("api_key")))
+        if kw.get("api_key") == "k1":
+            raise litellm.exceptions.RateLimitError(message="RESOURCE_EXHAUSTED: prepayment credits are depleted",
+                                                    llm_provider="gemini", model=kw["model"])
+        return _resp('{"winner": "A", "margin": "clear", "reason": "r"}')
+
+    monkeypatch.setattr(litellm, "completion", fake)
+    monkeypatch.setattr(litellm, "completion_cost", lambda **kw: 0.0)
+    llm = LLM(c)
+    llm.complete_json(stage="mine", system="s", user="ep 1", schema=DuelVerdict)
+    assert calls == [("gemini/gemini-3.8-flash", "k1"), ("gemini/gemini-3.8-flash", "k2")]
+    calls.clear()
+    llm.complete_json(stage="mine", system="s", user="ep 2", schema=DuelVerdict)
+    assert calls == [("gemini/gemini-3.8-flash", "k2")]  # stays on key 2, key 1 is not retried
 
 
 # --------------------------------------------------------------------------- full graph, offline, synthetic show

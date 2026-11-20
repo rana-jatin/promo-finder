@@ -79,7 +79,7 @@ def _schema_hint(schema: type[BaseModel]) -> str:
             + js)
 
 
-_DAILY = re.compile(r"per ?day|perday|per_day|daily|RPD", re.I)
+_DAILY = re.compile(r"per ?day|perday|per_day|daily|RPD|credits?|prepay|billing|insufficient_quota|depleted", re.I)
 _RETRY_DELAY = re.compile(r"retry[_ ]?delay\W+(\d+(?:\.\d+)?)s|retry in (\d+(?:\.\d+)?)\s*s|"
                           r"try again in (\d+(?:\.\d+)?)s|retry after (\d+(?:\.\d+)?) sec", re.I)
 
@@ -210,6 +210,10 @@ class LLM:
                 text = text.replace(key, key[:4] + "…redacted")
         return text
 
+    def log_event(self, row: dict) -> None:
+        """A stage-level note (e.g. a judge score clamped by a code rule) in the same call log."""
+        self._log(row)
+
     def _log(self, row: dict) -> None:
         if not self.call_log:
             return
@@ -335,7 +339,8 @@ class LLM:
             entry = route.models[pos]
             model = entry["name"]
             with self.lock:
-                limiter = self.limiters.setdefault(model, RateLimiter(entry.get("rpm")))
+                limiter = self.limiters.setdefault(model + "|" + str(entry.get("api_key_env", "")),
+                                                   RateLimiter(entry.get("rpm")))
             limiter.wait()
             kwargs: dict[str, Any] = dict(model=model, messages=messages, max_tokens=max_tokens,
                                           timeout=entry.get("timeout_s", self.c.get("timeout_s", 180)),
@@ -383,7 +388,7 @@ class LLM:
                 msg = str(e)
                 if _FILTERED.search(msg) and not re.search(r"response_format", msg, re.I):
                     self._log({"stage": stage, "model": model, "event": "content_filtered", "error": msg[:300]})
-                    skip += 1  # e.g. Azure's content filter on a slap or a threat: try the fallback, this call only
+                    skip = self._past_same_model(route, pos) - route.idx  # e.g. Azure's filter on a slap: next MODEL, this call only
                     continue
                 if re.search(r"temperature", msg, re.I) and not entry.get("no_temperature"):
                     entry["no_temperature"] = True  # reasoning deployments accept only the default
@@ -413,7 +418,7 @@ class LLM:
                 # off mid-JSON. Retrying the same model gets the same block, so use the fallback for this call.
                 self._log({"stage": stage, "model": model, "event": "content_filtered", "finish": finish,
                            "partial_chars": len(text)})
-                skip += 1
+                skip = self._past_same_model(route, pos) - route.idx
                 continue
             if not text and finish == "length":
                 # reasoning models (gpt-5-nano, gemini 3) can spend the whole budget thinking and return nothing.
@@ -424,13 +429,22 @@ class LLM:
                 if max_tokens < cap:
                     max_tokens = min(cap, max_tokens * 2)
                 else:
-                    skip += 1
+                    skip = self._past_same_model(route, pos) - route.idx
                 continue
             self._log({"stage": stage, "model": getattr(resp, "model", model) or model, "event": "ok",
                        "finish": finish, "prompt_tokens": pt, "completion_tokens": ct, "seconds": round(dt, 2)})
             return text or "{}", {"model": getattr(resp, "model", None) or model, "requested_model": model,
                                   "usage": {"prompt_tokens": pt, "completion_tokens": ct}}
         raise RuntimeError(f"{stage}: gave up after {attempts} attempts on route '{route.name}'")
+
+    @staticmethod
+    def _past_same_model(route: Route, pos: int) -> int:
+        """Position of the next entry running a DIFFERENT model: a second API key for the same model would
+        hit the same safety block or token cap, so a per-call refusal skips every key of that model."""
+        n = pos + 1
+        while n < len(route.models) and route.models[n]["name"] == route.models[pos]["name"]:
+            n += 1
+        return n
 
     def _next_model(self, route: Route, failed_pos: int) -> bool:
         with self.lock:

@@ -14,8 +14,8 @@ from tests.conftest import PACK
 from tests.synthetic_show import make_show
 
 ROW = re.compile(r"^(E\d+\.[SLAX]\d+) \[(\d+\.\d)\]", re.M)
-FAILS = ["none", "none", "hook_late", "hook_weak", "answered_in_clip", "no_open_question", "needs_context",
-         "unclear_stakes", "too_short"]
+FAILS = ["none", "none", "hook_late", "hook_weak", "answered_in_clip", "ends_on_replay", "no_open_question",
+         "needs_context", "unclear_stakes", "3. hook_late"]
 
 
 def _rows(text: str) -> list[tuple[str, float]]:
@@ -30,7 +30,9 @@ def fake_call(self, stage, route, messages, max_tokens, temperature):
             {"name": "Lena", "aliases": ["Lady Lena"], "role": "heroine", "visual_descriptor": "young woman in a plain gown"},
             {"name": "Viktor", "aliases": [], "role": "hero", "visual_descriptor": "scarred bearded soldier"},
             {"name": "Mara", "role": "heroine", "visual_descriptor": "woman in grey"}],
-            "tropes": ["hidden_identity"], "spoilers": [{"episode": 2, "reveal": "x", "keywords": ["guards"]}]}
+            "tropes": ["hidden_identity", "not_a_listed_trope"],
+            "spoilers": [{"episode": 2, "reveal": "x", "keywords": ["the guards"]}],
+            "arcs": [{"id": "the_vow", "name": "The vow", "episodes": [1, 2, 3]}, {"name": "Hidden Name", "episodes": [2, 4]}]}
     elif stage == "mine":
         main, _, nxt = user.partition("FIRST ")
         rows = _rows(main)
@@ -42,7 +44,8 @@ def fake_call(self, stage, route, messages, max_tokens, temperature):
             a = rnd.randrange(0, max(1, len(lines) - 5))
             cliff = next((l for l in lines[a:] if l[1] >= lines[a][1] + rnd.choice([12, 22, 35])), lines[-1])
             out["moments"].append({"template": "continuous", "start_id": lines[a][0], "hook_id": lines[min(a + rnd.choice([0, 1]), len(lines) - 1)][0],
-                                   "cliff_id": cliff[0], "hook_type": "Slap!", "trope": "Hidden Identity", "confidence": rnd.choice([0.4, 0.9, 7])})
+                                   "cliff_id": cliff[0], "hook_type": "Slap!", "trope": "Hidden Identity", "confidence": rnd.choice([0.4, 0.9, 7]),
+                                   "intended_question": "Will she strike back?", "why": "slap then threat"})
             b = rnd.randrange(2, max(3, len(lines) - 3))
             peak = lines[b]
             after = [l for l in lines if l[1] > peak[1] + 5]
@@ -54,12 +57,20 @@ def fake_call(self, stage, route, messages, max_tokens, temperature):
                 out["moments"].append({"template": "continuous", "start_id": "E99.L01", "hook_id": "E99.L01", "cliff_id": "E99.L02"})
             nrows = [r for r in _rows(nxt) if ".L" in r[0]]
             if nrows and rnd.random() < 0.6:
-                out["bridge"] = {"start_id": lines[-3][0], "hook_id": lines[-3][0], "next_cliff_id": rnd.choice(nrows)[0],
-                                 "trope": "cliff", "confidence": 0.6}
-            out["setups"] = [{"id": rnd.choice(lines)[0], "what": "a vow"}]
-            out["payoffs"] = [{"id": rnd.choice(lines)[0], "what": "the vow breaks"}]
+                bridge = {"start_id": lines[-3][0], "hook_id": rnd.choice([lines[-3][0], ""]),
+                          "next_cliff_id": rnd.choice(nrows)[0], "trope": "cliff", "confidence": 0.6}
+                if rnd.random() < 0.7:  # v3: a moment with template "bridge"; else the v1 field
+                    out["moments"].append({**bridge, "template": "bridge", "cliff_id": "", "hook_type": "threat",
+                                           "intended_question": "Who is at the door?"})
+                else:
+                    out["bridge"] = {**bridge, "open_question": "Who is at the door?"}
+            elif rnd.random() < 0.2:  # a bridge with no next-episode preview must be dropped
+                out["moments"].append({"template": "bridge", "start_id": lines[-3][0], "next_cliff_id": "E99.L01"})
+            out["setups"] = [{"id": rnd.choice(lines)[0], "what": "a vow", "arc": rnd.choice(["the_vow", "hidden_name", "new", "bogus"])}]
+            out["payoffs"] = [{"id": rnd.choice(lines)[0], "what": "the vow breaks", "arc": "the_vow"}]
     elif stage == "link":
-        blocks = re.findall(r"^(E\d+\.[SLAX]\d+) \(Ep (\d+), (setup|payoff)\).*?\n((?:    .*\n?)+)", user, re.M)
+        assert "Spoilers (never show these reveals):" in user and "ARC the_vow: The vow" in user
+        blocks = re.findall(r"^ *(E\d+\.[SLAX]\d+) \(Ep (\d+), (setup|payoff)\).*?\n((?:    .*\n?)+)", user, re.M)
         stitches = []
         by_ep = {}
         for bid, ep, kind, ctx in blocks:
@@ -73,10 +84,12 @@ def fake_call(self, stage, route, messages, max_tokens, temperature):
             e1, e2 = rnd.sample(eps, 2)
             s1, s2 = rnd.choice(by_ep[e1]), rnd.choice(by_ep[e2])
             stitches.append({"segments": [{"start_id": s1[0], "end_id": s1[-1]}, {"start_id": s2[0], "end_id": s2[-1]}],
-                             "hook_id": s1[0], "cliff_id": s2[-1], "trope": "hidden_identity", "confidence": 0.8})
+                             "hook_id": s1[0], "cliff_id": s2[-1], "trope": "hidden_identity", "confidence": 0.8,
+                             "hook_type": "reveal", "arc": rnd.choice(["the_vow", "zzz"]), "intended_question": "q", "why": "w"})
         out = {"stitches": stitches}
     elif stage.startswith("judge"):
         n = len(re.findall(r"^\[\d+\]", user, re.M))
+        assert re.search(r"^\[0\] ", user, re.M) and "--- 3.0s HOOK WINDOW ENDS ---" in user, user[:300]
         f = rnd.choice(FAILS)
         out = {"hook_score": rnd.choice([2, 3, 4, 5, 6]), "cliffhanger_score": rnd.choice([1, 3, 4, 5]),
                "standalone_score": rnd.choice([2, 3, 4, 5]), "trope_pull_score": rnd.choice([2, 3, 4, 5]),
@@ -84,10 +97,11 @@ def fake_call(self, stage, route, messages, max_tokens, temperature):
                "answered_in_clip": f == "answered_in_clip", "who_wants_what": "x", "why_it_works": "y",
                "main_failure": f.upper() if rnd.random() < 0.2 else f,
                "missing_entity": "the duke" if f == "needs_context" else None,
-               "resolution_line": rnd.randint(1, max(1, n)) if f == "answered_in_clip" else None,
-               "best_hook_line": f"[{rnd.randint(1, max(1, n))}]" if f in ("hook_weak", "hook_late") else None}
+               "resolution_line": rnd.randint(0, max(0, n - 1)) if f == "answered_in_clip" else None,
+               "best_hook_line": f"[{rnd.randint(0, max(0, n - 1))}]" if f in ("hook_weak", "hook_late") else None}
     elif stage == "duel":
-        out = {"winner": rnd.choice(["A", "B", "Promo B"]), "margin": "clear", "reason": "z"}
+        assert "A_SPEAKER_" in user or "B_SPEAKER_" in user or "LINE " not in user
+        out = {"reason": "z", "winner": rnd.choice(["A", "B", "Promo B"])}
     else:
         raise AssertionError(stage)
     text = json.dumps(out)

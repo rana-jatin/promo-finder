@@ -35,6 +35,11 @@ HINTS = {"AuthenticationError": "the API key was rejected",
          "BadRequestError": "the provider rejected the request"}
 
 
+def recording_key(settings: dict) -> str:
+    """Which recorded sample run matches these settings (tools/record_sample.py writes the same keys)."""
+    return f"fast={bool(settings.get('fast'))}|duels={bool(settings.get('duels'))}|repair={settings.get('repair_rounds')}"
+
+
 def _jsonl(p: Path) -> list[dict]:
     if not p.exists():
         return []
@@ -63,6 +68,7 @@ class RunHandle:
         self.busy_s = 0.0
         self.lock = threading.Lock()
         self.app = self.ctx = self.config = self.llm = None
+        self.recorded: dict | None = None  # sample replays: metrics of the run that recorded the cache
 
     def note(self, text: str) -> None:
         with self.lock:
@@ -84,18 +90,20 @@ class RunHandle:
                     (["offline heuristic baseline (no API)"] if self.llm else []),
                     "stages": stages, "log": list(self.log[-60:]), "elapsed_s": round(busy, 1),
                     "review": self.review, "files": [f for f in DOWNLOADS if (self.out_dir / f).exists()],
-                    "llm": self.llm.snapshot()["total"] if self.llm else {}}
+                    "llm": self.llm.snapshot()["total"] if self.llm else {}, "recorded": self.recorded}
 
 
 class RunManager:
     def __init__(self, root: str | Path, workers: int = 2, ttl_s: float = 6 * 3600,
-                 seed_cache: str | Path | None = None, overlay: str | Path | None = None):
+                 seed_cache: str | Path | None = None, overlay: str | Path | None = None,
+                 recorded: str | Path | None = None):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.cache_dir = self.root / "llm_cache"
         if seed_cache and Path(seed_cache).is_dir():  # pre-recorded answers for the sample show: instant demo
             shutil.copytree(seed_cache, self.cache_dir, dirs_exist_ok=True)
         self.overlay = overlay
+        self.recorded = _json(Path(recorded)) if recorded and Path(recorded).exists() else {}
         self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="run")
         self.runs: dict[str, RunHandle] = {}
         self.lock = threading.Lock()
@@ -107,6 +115,8 @@ class RunManager:
         run_id = uuid.uuid4().hex[:12]
         public = {k: v for k, v in settings.items() if k != "api_key"}
         h = RunHandle(run_id, self.root, settings, public)
+        if settings.get("source") == "sample" and settings.get("engine") == "cloud":
+            h.recorded = (self.recorded.get("runs") or {}).get(recording_key(settings))
         h.show_dir.mkdir(parents=True)
         for name, data in files.items():
             (h.show_dir / name).write_bytes(data)
@@ -230,8 +240,12 @@ class RunManager:
             items.append({**it, "hook_at_s": (p.get("hook") or {}).get("at_s"), "scores": p.get("scores"),
                           "trope": p.get("trope"), "repairs": p.get("repairs", []),
                           "in_free_window": p.get("in_free_window"), "spoiler": p.get("spoiler")})
+        try:
+            held = h.app.get_state(h.config).values.get("held_back") or {}
+        except Exception:  # noqa: BLE001 - display only
+            held = {}
         return {"round": payload.get("round", 0), "shortlist": items,
-                "reserve": len(ranked.get("reserve", []))}
+                "reserve": len(ranked.get("reserve", [])), "held_back": held}
 
     # ---- quality tab
     @staticmethod
@@ -241,7 +255,9 @@ class RunManager:
         pool = _jsonl(h.out_dir / "pool.jsonl")
         meta = _json(h.out_dir / "run_meta.json") or {}
         repaired = [c for c in cands if c.get("rounds", 0) > 0]
-        first_pass = [c for c in cands if (c.get("refine_history") or [{}])[0].get("main_failure") in ("none", None)]
+        def clean(h0: dict) -> bool:  # threshold pass (v3); older runs only logged the label
+            return h0["passed"] if "passed" in h0 else h0.get("main_failure") in ("none", None)
+        first_pass = [c for c in cands if clean((c.get("refine_history") or [{}])[0])]
         n = len(cands)
         return {
             "pool": len(pool), "judged": n, "rejected_by_code": len(code_rejects),
@@ -251,7 +267,11 @@ class RunManager:
             "repaired": len(repaired),
             "repair_yield": round(sum(1 for c in repaired if c.get("eligible")) / len(repaired), 3) if repaired else None,
             "templates": dict(Counter(c.get("template") for c in cands)),
-            "failures": dict(Counter((c.get("refine_history") or [{}])[0].get("main_failure") or "none" for c in cands)),
+            "failures": dict(Counter("clean pass" if clean((c.get("refine_history") or [{}])[0])
+                                     else ((c.get("refine_history") or [{}])[0].get("main_failure") or "unspecified")
+                                     for c in cands)),
+            "reserve": len((_json(h.out_dir / "ranked.json") or {}).get("reserve", [])),
+            "recorded": h.recorded,
             "llm": meta.get("llm", {}).get("total") or (h.llm.snapshot()["total"] if h.llm else {}),
             "calls_per_model": meta.get("llm", {}).get("calls_per_model", {}),
             "seconds": meta.get("seconds"), "review": meta.get("review"),

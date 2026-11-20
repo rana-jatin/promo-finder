@@ -45,3 +45,10 @@ run:
   max_concurrency: 4
   fast_episodes: 5
   fast_judge: 15
+
+select:
+  # the demo runs 3-6 episodes: a top 10 would swallow every eligible promo and leave no reserve, so the
+  # editor's reject -> backfill step would have nothing to promote. Top 5 + reserve, 3 per episode.
+  shortlist: 5
+  reserve: 5
+  max_per_episode: 3

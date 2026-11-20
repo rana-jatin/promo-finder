@@ -154,8 +154,8 @@ def build(show: Show, feats: dict, spec: dict, cfg: dict) -> tuple[dict | None, 
         "template": spec["template"], "source": spec["source"], "segments": segs,
         "hook": {"id": spec["hook_id"], "ep": hook_b.ep, "type": spec.get("hook_type", "other")},
         "cliff": {"id": spec["cliff_id"], "ep": cliff_b.ep},
-        "peak_id": spec.get("peak_id"), "trope": spec.get("trope", "other"),
-        "mined_question": spec.get("open_question", ""), "confidence": spec.get("confidence", 0.5),
+        "peak_id": spec.get("peak_id"), "trope": spec.get("trope", "other"), "arc": spec.get("arc"),
+        "mined_question": spec.get("intended_question", ""), "confidence": spec.get("confidence", 0.5),
         "why_mined": spec.get("why", ""), "notes": notes, "repairs": [],
     }
     refresh(show, feats, cand)
@@ -233,37 +233,49 @@ def auto_repair(show: Show, feats: dict, cand: dict, errs: list[str], cfg: dict)
 
 
 # --------------------------------------------------------------------------- specs from mined beats
+def _question(x: dict) -> str:
+    return x.get("intended_question") or x.get("open_question") or ""  # v1 records say open_question
+
+
+def _bridge_spec(n: int, nxt: int, b: dict, source: str) -> dict:
+    return {"source": source, "template": "bridge", "hook_type": b.get("hook_type", "other"),
+            "trope": b.get("trope", "other"), "intended_question": _question(b), "why": b.get("why", ""),
+            "confidence": b.get("confidence", 0.5), "hook_id": b.get("hook_id") or b["start_id"],
+            "cliff_id": b["next_cliff_id"],
+            "segs": [{"ep": n, "start_id": b["start_id"], "to_end": True, "role": "main"},
+                     {"ep": nxt, "start_id": b.get("next_start_id"), "start_t": 0.0,
+                      "end_id": b["next_cliff_id"], "role": "next"}]}
+
+
 def specs_from_beats(show: Show, beats: list[dict]) -> list[dict]:
     specs: list[dict] = []
     for rec in beats:
         res = rec["result"]
         if rec.get("kind") == "mine":
-            n = rec["ep"]
+            n, nxt = rec["ep"], rec.get("next_ep")
             for k, m in enumerate(res.get("moments") or [], 1):
+                if m["template"] == "bridge":
+                    if nxt is not None:
+                        specs.append(_bridge_spec(n, nxt, m, f"mine:E{n:02d}:bridge"))
+                    continue
                 base = {"source": f"mine:E{n:02d}:m{k}", "hook_type": m["hook_type"], "trope": m["trope"],
-                        "open_question": m["open_question"], "confidence": m["confidence"],
-                        "cliff_id": m["cliff_id"]}
+                        "intended_question": _question(m), "why": m.get("why", ""),
+                        "confidence": m["confidence"], "cliff_id": m["cliff_id"]}
                 if m["template"] == "cold_open" and m.get("peak_id"):
                     specs.append({**base, "template": "cold_open", "hook_id": m["peak_id"], "peak_id": m["peak_id"],
                                   "segs": [{"ep": n, "flash_id": m["peak_id"], "role": "flash"},
                                            {"ep": n, "start_id": m["start_id"], "end_id": m["cliff_id"], "role": "main"}]})
                 else:
-                    specs.append({**base, "template": "continuous", "hook_id": m["hook_id"],
+                    specs.append({**base, "template": "continuous", "hook_id": m["hook_id"] or m["start_id"],
                                   "segs": [{"ep": n, "start_id": m["start_id"], "end_id": m["cliff_id"], "role": "main"}]})
-            b = res.get("bridge")
-            if b and rec.get("next_ep") is not None:
-                nxt = rec["next_ep"]
-                specs.append({"source": f"mine:E{n:02d}:bridge", "template": "bridge", "hook_type": "other",
-                              "trope": b["trope"], "open_question": b["open_question"],
-                              "confidence": b["confidence"], "hook_id": b.get("hook_id") or b["start_id"],
-                              "cliff_id": b["next_cliff_id"],
-                              "segs": [{"ep": n, "start_id": b["start_id"], "to_end": True, "role": "main"},
-                                       {"ep": nxt, "start_id": b.get("next_start_id"), "start_t": 0.0,
-                                        "end_id": b["next_cliff_id"], "role": "next"}]})
+            b = res.get("bridge")  # v1 records only; v3 bridges arrive as moments
+            if b and nxt is not None:
+                specs.append(_bridge_spec(n, nxt, b, f"mine:E{n:02d}:bridge"))
         elif rec.get("kind") == "link":
             for k, st in enumerate(res.get("stitches") or [], 1):
-                specs.append({"source": f"link:{k}", "template": "arc_stitch", "hook_type": "other",
-                              "trope": st["trope"], "open_question": st["open_question"],
+                specs.append({"source": f"link:{k}", "template": "arc_stitch",
+                              "hook_type": st.get("hook_type", "other"), "trope": st["trope"],
+                              "arc": st.get("arc", "new"), "intended_question": _question(st),
                               "confidence": st["confidence"], "why": st.get("why", ""),
                               "hook_id": st["hook_id"], "cliff_id": st["cliff_id"],
                               "segs": [{"ep": ep_of(sg["start_id"]), "start_id": sg["start_id"],

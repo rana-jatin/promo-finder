@@ -9,7 +9,9 @@ llm:
     context:               # the two once-per-season calls that shape everything: show bible + season-wide linking
       stages: [bible, link]
       models:              # Gemini (large context window)
+        # Gemini keys rotate: key 1 -> key 2 (same model) -> next model. A daily-cap or out-of-credits 429 moves on for good.
         - name: gemini/gemini-4-hydrogen         # $1.50 / $7.50
+          api_key_env: GEMINI_API_KEY
           rpm: 10
           timeout_s: 600
           extra: &gemini_safety
@@ -18,21 +20,44 @@ llm:
               - {category: HARM_CATEGORY_HATE_SPEECH, threshold: BLOCK_NONE}
               - {category: HARM_CATEGORY_DANGEROUS_CONTENT, threshold: BLOCK_NONE}
               - {category: HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: BLOCK_NONE}
-        - name: gemini/gemini-3.8-flash          # fallback: daily cap, outage, or a safety block
+        - name: gemini/gemini-4-hydrogen         # same model, 2nd key
+          api_key_env: GEMINI_API_KEY_1
           rpm: 10
           timeout_s: 600
           extra: *gemini_safety
-        - name: groq/openai/gpt-oss-120b         # $0.15 / $0.60; last resort (131k context, prompts measured <= 15k)
+        - name: gemini/gemini-3.8-flash          # fallback: daily cap, outage, or a safety block
+          api_key_env: GEMINI_API_KEY
+          rpm: 10
+          timeout_s: 600
+          extra: *gemini_safety
+        - name: gemini/gemini-3.8-flash
+          api_key_env: GEMINI_API_KEY_1
+          rpm: 10
+          timeout_s: 600
+          extra: *gemini_safety
+        - name: groq/openai/gpt-oss-120b         # $0.15 / $0.60; last resort (131k context; v3 link prompt ~17k on show1)
           rpm: 20
     mine:                  # per-episode mining (50 calls a run, with the show bible as context)
       stages: [mine]
       models:
         # pinned, not the gemini-flash-latest alias (which moves forward), so runs stay comparable.
         - name: gemini/gemini-3.8-flash          # $0.75 / $3.75 through 2026-12-31, then $1.50 / $7.50
+          api_key_env: GEMINI_API_KEY
           rpm: 10
           timeout_s: 600   # free-tier Flash measured at 70-170 s per call (queueing, not prompt size)
           extra: *gemini_safety
+        - name: gemini/gemini-3.8-flash          # same model, 2nd key
+          api_key_env: GEMINI_API_KEY_1
+          rpm: 10
+          timeout_s: 600
+          extra: *gemini_safety
         - name: gemini/gemini-flash-lite-latest  # $0.30 / $2.50; separate quota, used once Flash hits its daily cap
+          api_key_env: GEMINI_API_KEY
+          rpm: 15
+          timeout_s: 600
+          extra: *gemini_safety
+        - name: gemini/gemini-flash-lite-latest
+          api_key_env: GEMINI_API_KEY_1
           rpm: 15
           timeout_s: 600
           extra: *gemini_safety
@@ -68,12 +93,16 @@ llm:
   # paid rates in USD per 1M tokens; check current pricing before quoting a number.
   price_per_mtok: {input: 0.30, output: 2.50}
 
-prompts:                   # versioned prompt files in prompts/; the version is written into every output
-  bible: bible_v1
-  mine: mine_v1
-  link: link_v1
-  judge: judge_v1
-  duel: duel_v1
+prompt_version: v3         # every stage loads prompts/<stage>_v3.md; the file name is written into every output record
+prompts: {}                # optional per-stage override for A/B tests, e.g. {judge: judge_v1}
+
+vocab:                     # closed lists: filled into the prompts AND enforced as schema enums
+  # the bible picks the show's tropes from this list; mining and linking then choose from the bible's picks + "other"
+  tropes: [hidden_identity, humiliation_revenge, betrayal, contract_marriage, forbidden_romance, evil_stepfamily,
+           rags_to_riches, rescue, secret_baby, enemies_to_lovers, second_chance, love_triangle,
+           mistaken_identity, framed_for_crime, stolen_birthright, fake_relationship]
+  hook_types: [slap, violence, insult, humiliation, reveal, threat, confrontation, kiss, rescue, betrayal,
+               shocking_line, other]
 
 run:
   max_concurrency: 10      # parallel workers in fan-outs; slow Gemini calls overlap (rpm caps still apply)
@@ -99,8 +128,11 @@ score:
   # S = 0.30 H + 0.25 C + 0.20 A + 0.15 T + 0.10 P - penalties   (all on a 1-5 scale)
   weights: {hook: 0.30, cliff: 0.25, standalone: 0.20, trope: 0.15, pace: 0.10}
   min_score: 3.5           # absolute floor: "no promo" beats a forced pick
+  # Pass/fail is decided in code from these numbers, never from the judge's main_failure label (that only picks
+  # the repair). A clip passes when its weighted score >= min_score AND every score below meets its floor.
+  # answered_in_clip / an empty open question clamp cliffhanger_score to 2, so they always fail the cliff floor.
+  pass_floors: {hook_score: 3, cliffhanger_score: 3, standalone_score: 3}
   max_repair_rounds: 2
-  hard_fails: [answered_in_clip, no_open_question]
 
 penalties:
   per_extra_segment: 0.15  # each segment beyond 2 (jump-cut cost)

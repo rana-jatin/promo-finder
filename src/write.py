@@ -27,7 +27,8 @@ def shot_range(show: Show, s: dict) -> list[str]:
     return [cells[0].id, cells[-1].id] if cells else []
 
 
-def promo_record(show: Show, c: dict, aliases) -> dict:
+def promo_record(show: Show, c: dict, cast, prompts: dict | None = None,
+                 hook_s: float = 3.0) -> dict:
     v = c["verdict"]
     segs = [{"episode": s["ep"], "start": fmt_ts(s["start"]), "end": fmt_ts(s["end"]),
              "role": s.get("role", "main"), "shot_range": shot_range(show, s),
@@ -37,7 +38,9 @@ def promo_record(show: Show, c: dict, aliases) -> dict:
     for s, out in zip(rt["segments"], segs):
         s["start"], s["end"] = parse_ts(out["start"]), parse_ts(out["end"])
     edited = any(n.startswith("editor:") for n in c.get("notes", []))
-    rt_ok = clip_sha(render_clip(show, rt, aliases)[0]) == v.get("clip_sha")
+    rt_ok = clip_sha(render_clip(show, rt, cast, hook_s=hook_s)[0]) == v.get("clip_sha")
+    prompts = prompts or {}
+    origin = "link" if str(c["source"]).startswith("link:") else "mine"
     return {
         "promo_id": f"P{c['rank']:02d}" if c.get("rank") else c["cand_id"],
         "rank": c.get("rank"),
@@ -58,6 +61,8 @@ def promo_record(show: Show, c: dict, aliases) -> dict:
         "penalty_detail": c.get("penalty_detail", {}),
         "duel_record": c.get("duel_record"),
         "trope": c.get("trope", "other"),
+        "arc": c.get("arc"),
+        "mined_question": c.get("mined_question", ""),
         "spoiler": c.get("spoiler", False),
         "in_free_window": c.get("in_free_window"),
         "flags": c.get("flags", []),
@@ -67,7 +72,9 @@ def promo_record(show: Show, c: dict, aliases) -> dict:
         "edited_by_editor": edited,
         "source": c["source"],
         "model": v.get("model"),
-        "prompt_versions": {"judge": v.get("prompt_version")},
+        "prompt_versions": {k: x for k, x in (("bible", prompts.get("bible")), (origin, prompts.get(origin)),
+                                               ("judge", v.get("prompt_version")),
+                                               ("duel", prompts.get("duel") if c.get("duel_record") else None)) if x},
     }
 
 
@@ -75,10 +82,11 @@ def _fmt_segments(rec: dict) -> str:
     return " + ".join(f"E{s['episode']:02d} {s['start']}-{s['end']}" for s in rec["segments"])
 
 
-def write_outputs(out_dir: str | Path, show: Show, state: dict, cfg: dict, aliases, run_meta: dict) -> dict:
+def write_outputs(out_dir: str | Path, show: Show, state: dict, cfg: dict, cast, run_meta: dict) -> dict:
     out = Path(out_dir)
-    ranked = [promo_record(show, c, aliases) for c in state.get("ranked") or []]
-    reserve = [promo_record(show, {**c, "rank": None}, aliases) for c in state.get("reserve") or []]
+    kw = {"prompts": cfg["prompts"], "hook_s": cfg["promo"]["hook_max_s"]}
+    ranked = [promo_record(show, c, cast, **kw) for c in state.get("ranked") or []]
+    reserve = [promo_record(show, {**c, "rank": None}, cast, **kw) for c in state.get("reserve") or []]
     write_json(out / "ranked.json", {"show": show.title, "show_id": show.show_id, "promos": ranked,
                                      "reserve": reserve, "run": run_meta})
     report = build_report(show, state, ranked, cfg, run_meta, out)
@@ -110,17 +118,27 @@ def build_report(show: Show, state: dict, ranked: list[dict], cfg: dict, run_met
     L.append(f"- Candidates assembled: {len(pool)} valid, {len(rejected)} rejected by code "
              f"({', '.join(f'{k} {v}' for k, v in rej.most_common(6)) or 'none'})")
     passed = sum(1 for j in judged if j.get("eligible"))
+    held = state.get("held_back") or {}
+    held_txt = (" (held back: " + ", ".join(f"{n} {r}" for r, n in held.items()) + ")") if held else ""
     L.append(f"- Judged (cold): {len(judged)} in {state.get('batch', 1)} batch(es); eligible after penalties: "
-             f"{passed}; shortlisted: {len(ranked)}")
+             f"{passed}; shortlisted: {len(ranked)}; reserve: {len(state.get('reserve') or [])}{held_txt}")
     rt_bad = [r["promo_id"] for r in ranked if not r["round_trip_ok"]]
     proposed = len(pool) + sum(1 for r in rejected if "near_duplicate" not in r.get("errors", []))
     valid = len(pool)
     L.append(f"- Validator pass rate on proposed beats: {valid}/{proposed} "
              f"({valid / max(proposed, 1):.0%}, after at most one auto-repair); every published promo passes all "
              f"hard rules; timestamp round trip: {'all OK' if not rt_bad else 'MISMATCH ' + ', '.join(rt_bad)}")
-    L.append(f"- LLM: {int(llm.get('calls', 0))} API calls, {int(llm.get('cache_hits', 0))} cache hits, "
-             f"{int(llm.get('prompt_tokens', 0)):,} in / {int(llm.get('completion_tokens', 0)):,} out tokens, "
-             f"est. ${llm.get('cost_usd', 0):.3f}; wall-clock {run_meta.get('seconds', 0):.0f}s\n")
+    calls, hits = int(llm.get("calls", 0)), int(llm.get("cache_hits", 0))
+    secs = run_meta.get("seconds", 0)
+    wall = f"{secs:.0f}s" if secs >= 1 else "under 1 s"
+    if calls == 0 and hits:
+        L.append(f"- LLM: all {hits} model answers replayed from the prompt cache (0 new API calls, no cost); "
+                 f"wall-clock {wall}. The calls and cost of the run that recorded them are in that run's "
+                 f"run_meta.json (hosted sample show: sample_data/recorded_run.json).\n")
+    else:
+        L.append(f"- LLM: {calls} API calls, {hits} cache hits, "
+                 f"{int(llm.get('prompt_tokens', 0)):,} in / {int(llm.get('completion_tokens', 0)):,} out tokens, "
+                 f"est. ${llm.get('cost_usd', 0):.3f}; wall-clock {wall}\n")
 
     L.append("## Post these first\n")
     if not ranked:

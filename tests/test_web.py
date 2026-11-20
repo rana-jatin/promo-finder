@@ -120,6 +120,9 @@ def test_api_policy(monkeypatch, tmp_path):
     assert s["status"] == "review", s
     assert c.get(f"/api/runs/{rid}/files/runs.db").status_code == 404
     assert c.get(f"/api/runs/{rid}/files/ranked.json").status_code == 200
+    assert c.get(f"/api/runs/{rid}/files/parsed.json").status_code == 404  # the script itself stays private
+    assert "beats.jsonl" in s["files"]  # raw stage outputs are listed for the Raw outputs panel
+    assert c.get(f"/api/runs/{rid}/files/beats.jsonl").text.strip()
 
 
 def test_clip_text_cuts_at_a_word_boundary():

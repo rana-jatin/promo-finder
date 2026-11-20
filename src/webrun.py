@@ -27,9 +27,14 @@ from .parse import parse_show
 ROOT = Path(__file__).resolve().parent.parent
 STAGES = ["parse", "bible", "mine", "link", "assemble", "refine", "coverage", "select", "duel", "order", "write",
           "editor"]
+# Every output a visitor may read or download, in pipeline-result order. parsed.json (the script itself) and
+# runs.db (checkpoints) stay private. llm_calls.jsonl holds call metadata only, and keys are scrubbed from it.
 DOWNLOADS = {"ranked.json": "application/json", "candidates.jsonl": "application/x-ndjson",
              "report.md": "text/markdown; charset=utf-8", "run_meta.json": "application/json",
-             "decisions.jsonl": "application/x-ndjson", "bible.json": "application/json"}
+             "decisions.jsonl": "application/x-ndjson", "bible.json": "application/json",
+             "beats.jsonl": "application/x-ndjson", "pool.jsonl": "application/x-ndjson",
+             "rejected_by_code.jsonl": "application/x-ndjson", "duels.jsonl": "application/x-ndjson",
+             "features.json": "application/json", "llm_calls.jsonl": "application/x-ndjson"}
 
 
 def recording_key(settings: dict) -> str:

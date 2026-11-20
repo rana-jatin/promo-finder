@@ -183,6 +183,7 @@ function renderProgress(s) {
   const logEl = $("#log");
   logEl.scrollTop = logEl.scrollHeight;
   $("#models").innerHTML = s.models.map((m) => `<div>${esc(m)}</div>`).join("");
+  renderRawPicker(s);
   $("#elapsed").innerHTML = runCostLine(s);
   const msg = {
     queued: "Queued: waiting for a free worker…",
@@ -211,6 +212,56 @@ function runCostLine(s) {
   if (llm.cost_usd) parts.push(`~$${llm.cost_usd.toFixed(3)}`);
   if (llm.offline) parts.push("offline, no API");
   return esc(parts.join(" · "));
+}
+
+// ---------------------------------------------------------------- raw outputs
+// Shows each output file exactly as the pipeline wrote it (no formatting), fetched only while the panel is open.
+const RAW_MAX_CHARS = 400_000;
+
+function renderRawPicker(s) {
+  const sel = $("#raw-file");
+  const want = sel.value || store.get("rawFile", "ranked.json");
+  const sig = s.files.join("|");
+  if (sel.dataset.sig !== sig) {
+    sel.dataset.sig = sig;
+    sel.innerHTML = s.files.map((f) => `<option value="${esc(f)}">${esc(f)}${FILE_NOTES[f] ? ` · ${esc(FILE_NOTES[f])}` : ""}</option>`).join("");
+    if (s.files.includes(want)) sel.value = want;
+  }
+  if ($("#raw-wrap").open) loadRaw();
+}
+
+async function loadRaw(force = false) {
+  const name = $("#raw-file").value;
+  const pre = $("#raw");
+  const dl = $("#raw-dl");
+  if (!S.runId || !name) {
+    pre.textContent = "No output files yet. They appear as each stage writes them.";
+    $("#raw-meta").textContent = "";
+    dl.hidden = true;
+    return;
+  }
+  // refetch only when the file, the run or its progress changed: a running graph appends to the .jsonl files
+  const s = S.last || {};
+  const key = `${S.runId}:${name}:${s.status}:${s.log ? s.log.length : 0}:${s.review ? s.review.round : "x"}`;
+  if (!force && loadRaw.key === key) return;
+  loadRaw.key = key;
+  const url = `/api/runs/${S.runId}/files/${encodeURIComponent(name)}`;
+  dl.href = url;
+  dl.hidden = false;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    if ($("#raw-file").value !== name) return; // the editor picked another file meanwhile
+    const lines = name.endsWith(".jsonl") ? text.split("\n").filter((l) => l.trim()).length : null;
+    $("#raw-meta").textContent = [`${(new Blob([text]).size / 1000).toFixed(1)} KB`, lines != null ? `${lines} rows` : ""].filter(Boolean).join(" · ");
+    pre.textContent = !text ? "(empty file)"
+      : text.length > RAW_MAX_CHARS ? text.slice(0, RAW_MAX_CHARS) + `\n\n… truncated at ${RAW_MAX_CHARS.toLocaleString()} characters. Download the file for the rest.`
+        : text;
+  } catch (e) {
+    loadRaw.key = null;
+    pre.textContent = `Could not load ${name} (${e.message}).`;
+  }
 }
 
 // ---------------------------------------------------------------- review cards
@@ -384,7 +435,9 @@ async function resume() {
 
 // ---------------------------------------------------------------- quality
 const FILE_NOTES = { "ranked.json": "final promos + reserve", "candidates.jsonl": "every judged candidate", "report.md": "readable report",
-  "run_meta.json": "models, calls, cost", "decisions.jsonl": "editor decisions", "bible.json": "show bible" };
+  "run_meta.json": "models, calls, cost", "decisions.jsonl": "editor decisions", "bible.json": "show bible",
+  "beats.jsonl": "raw mining + linking output", "pool.jsonl": "assembled candidates", "rejected_by_code.jsonl": "cuts that failed the code checks",
+  "duels.jsonl": "head-to-head results", "features.json": "per-episode heat", "llm_calls.jsonl": "every model call: model, tokens, time" };
 
 async function loadQuality() {
   if (!S.runId || !S.last || !S.last.files.includes("ranked.json")) return;
@@ -498,6 +551,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const b = e.target.closest("[data-act]");
     if (b) setAction(b.closest(".promo"), b.dataset.act);
   });
+  $("#raw-wrap").addEventListener("toggle", () => { if ($("#raw-wrap").open) loadRaw(); });
+  $("#raw-file").addEventListener("change", () => { store.set("rawFile", $("#raw-file").value); loadRaw(true); });
   $("#resume").addEventListener("click", resume);
   $("#approve-rest").addEventListener("click", approveRest);
   boot();

@@ -155,6 +155,15 @@
           <summary>Event log</summary>
           <ol id="log" class="log"></ol>
         </details>
+        <details class="log-wrap" id="raw-wrap">
+          <summary>Raw outputs</summary>
+          <div class="raw-bar">
+            <select id="raw-file" aria-label="Output file"></select>
+            <span id="raw-meta" class="meta"></span>
+            <a id="raw-dl" class="ghost-link" download hidden>Download</a>
+          </div>
+          <pre id="raw" class="raw" tabindex="0">No output files yet. They appear as each stage writes them.</pre>
+        </details>
       </div>
     </section>
 
